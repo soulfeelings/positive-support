@@ -1,15 +1,18 @@
+import os
 import asyncio
 import logging
 import aiohttp
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-BOT_TOKEN = "8234250977:AAFSjY7Ci-xajOeB-JqRgWB2vTVtQaW9UCc"
-BACKEND_URL = "http://localhost:8000"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8234250977:AAFSjY7Ci-xajOeB-JqRgWB2vTVtQaW9UCc")
+# Public HTTPS URL to open inside Telegram WebApp (e.g. Cloudflare/Ngrok tunnel to http://localhost:8000)
+BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "https://xh3l8y-78-36-243-206.ru.tuna.am")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -23,6 +26,9 @@ main_kb = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text="📥 Получить поддержку")],
 ], resize_keyboard=True)
 
+def webapp_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть мини‑приложение", web_app=WebAppInfo(url=f"{BACKEND_PUBLIC_URL}/"))]])
+
 async def make_request(endpoint: str, data: dict):
     async with aiohttp.ClientSession() as s:
         async with s.post(f"{BACKEND_URL}/{endpoint}", json=data) as r:
@@ -30,7 +36,10 @@ async def make_request(endpoint: str, data: dict):
 
 @dp.message(Command("start"))
 async def start(message: types.Message, state: FSMContext):
-    await message.answer("👋 Привет! Чтобы начать, придумай себе уникальный никнейм.")
+    await message.answer(
+        "👋 Привет! Это бот поддержки. Можешь пользоваться через мини‑приложение (кнопка ниже) или прямо в чате.\n\nСначала придумай себе уникальный никнейм.",
+        reply_markup=webapp_kb()
+    )
     await state.set_state(SendStates.waiting_nickname)
 
 @dp.message(SendStates.waiting_nickname)
@@ -47,7 +56,7 @@ async def handle_nickname(message: types.Message, state: FSMContext):
     })
 
     if response.get("status") == "success":
-        await message.answer("✅ Ник установлен! Теперь выбери действие:", reply_markup=main_kb)
+        await message.answer("✅ Ник установлен! Открой мини‑приложение по кнопке выше или выбери действие ниже:", reply_markup=main_kb)
         await state.clear()
     else:
         await message.answer("⚠️ Такой ник уже занят. Попробуй другой:")

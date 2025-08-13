@@ -1,16 +1,44 @@
+import os
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 import asyncpg
 
 app = FastAPI()
 
-DB_HOST = "localhost"
-DB_PORT = 5432
-DB_USER = "postgres"
-DB_PASSWORD = "8998"
-DB_NAME = "support_bot"
+# Serve static files (for MiniApp.jsx)
+app.mount("/static", StaticFiles(directory="."), name="static")
+
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    # Simple page to host the mini app with UMD React and Babel
+    return """
+    <!doctype html>
+    <html lang=\"ru\">
+    <head>
+      <meta charset=\"utf-8\" />
+      <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+      <title>SupportCircle</title>
+      <link rel=\"preconnect\" href=\"https://unpkg.com\" />
+      <style>html,body,#root{height:100%}body{margin:0;background:#fff}</style>
+    </head>
+    <body>
+      <div id=\"root\"></div>
+      <script crossorigin src=\"https://unpkg.com/react@18/umd/react.production.min.js\"></script>
+      <script crossorigin src=\"https://unpkg.com/react-dom@18/umd/react-dom.production.min.js\"></script>
+      <script src=\"https://unpkg.com/@babel/standalone/babel.min.js\"></script>
+      <script type=\"text/babel\" data-presets=\"react\" src=\"/static/MiniApp.jsx\"></script>
+    </body>
+    </html>
+    """
+
+DB_HOST = os.getenv("DB_HOST", "db")
+DB_PORT = int(os.getenv("DB_PORT", "5432"))
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "8998")
+DB_NAME = os.getenv("DB_NAME", "support_bot")
 
 async def get_connection():
     return await asyncpg.connect(
