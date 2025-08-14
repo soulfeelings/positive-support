@@ -24,18 +24,10 @@ const useTelegram = () => {
   return { webapp, themeParams, color, haptic, notify, share };
 };
 
-// Demo data
-const samplePeople = [
-  { id: 1, name: "Анна", age: 23, need: "Переезд в другой город, страшно начинать всё с нуля.", tags: ["тревога", "адаптация"], city: "Берлин" },
-  { id: 2, name: "Иван", age: 30, need: "Выгорел на работе, нет сил, нужна моральная поддержка.", tags: ["выгорание"], city: "Кёльн" },
-  { id: 3, name: "Лена", age: 19, need: "Сложная сессия, хочется, чтобы кто-то подбодрил.", tags: ["учёба"], city: "Мюнхен" },
-  { id: 4, name: "Юра", age: 27, need: "Разрыв отношений, очень тяжело.", tags: ["отношения"], city: "Гамбург" },
-];
-
 const sampleTips = [
   "Поддержка — сначала слушать, потом советовать.",
   "Задавай открытые вопросы: 'Как ты себя чувствуешь?'",
-  "Называй сильные стороны человека — это придаёт сил.",
+  "Называй сильные стороны человека — это придаёт силу.",
   "Короткое тёплое сообщение лучше, чем долгий перфекционизм.",
 ];
 
@@ -101,7 +93,7 @@ const AppStyles = () => (
   `}</style>
 );
 
-const BottomTabs = ({ tab, setTab }) => {
+const BottomTabs = ({ activeTab, setActiveTab }) => {
   const items = [
     { key: "home", label: "Дом", icon: "🏠" },
     { key: "search", label: "Поиск", icon: "❤️" },
@@ -130,12 +122,29 @@ const BottomTabs = ({ tab, setTab }) => {
 function TelegramSupportMiniApp() {
   const { webapp, haptic, notify, share } = useTelegram();
   const [activeTab, setActiveTab] = useState("home");
-  const [queue, setQueue] = useState([]);
-  const [sent, setSent] = useState([]);
-  const [profile, setProfile] = useState({ nickname: "vasya", about: "", city: "", score: 0, photo_url: "" });
+  const [currentPerson, setCurrentPerson] = useState(null);
+  const [sentMessages, setSentMessages] = useState([]);
+  const [profile, setProfile] = useState({ 
+    nickname: "Пользователь", 
+    about: "", 
+    city: "", 
+    score: 0, 
+    photo_url: "",
+    user_id: null
+  });
+  const [loading, setLoading] = useState(false);
+  const [todayCount, setTodayCount] = useState(0);
 
-  const league = useMemo(() => leagues.find((l) => profile.score >= l.from && profile.score <= l.to) || leagues[0], [profile.score]);
+  const league = useMemo(() => 
+    leagues.find((l) => profile.score >= l.from && profile.score <= l.to) || leagues[0], 
+    [profile.score]
+  );
 
+  const getUserId = () => {
+    return tg?.initDataUnsafe?.user?.id || null;
+  };
+
+  // Инициализация приложения
   useEffect(() => {
     try {
       webapp?.ready();
@@ -144,71 +153,96 @@ function TelegramSupportMiniApp() {
     } catch {}
   }, [webapp]);
 
-  // Загружаем профиль и первый элемент очереди из API
-  useEffect(() => {
-    const uid = tg?.initDataUnsafe?.user?.id;
+  // Загрузка профиля пользователя
+  const loadProfile = async () => {
+    const uid = getUserId();
     if (!uid) return;
     
-    const loadProfileAndQueue = async () => {
-      try {
-        // Загружаем профиль
-        const profileResponse = await fetch('/profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: uid })
-        });
-        
-        if (profileResponse.ok) {
-          const profileData = await profileResponse.json();
-          if (profileData.status === 'ok') {
-            setProfile({
-              nickname: profileData.nickname || 'Пользователь',
-              about: 'Хочу поддерживать людей и делиться теплом.',
-              city: profileData.city || '',
-              score: profileData.score || 0,
-              photo_url: profileData.photo_url || ''
-            });
-          }
-        }
-        
-        // Загружаем первый элемент очереди
-        await loadNextQueueItem(uid);
-      } catch (error) {
-        console.error('Ошибка загрузки данных:', error);
-      }
-    };
-    
-    loadProfileAndQueue();
-  }, [tg]);
-
-  const loadNextQueueItem = async (userId) => {
     try {
-      const response = await fetch('/queue_next', {
+      const response = await fetch('/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId })
+        body: JSON.stringify({ user_id: uid })
       });
       
       const data = await response.json();
       if (data.status === 'ok') {
-        setQueue([{
-          id: data.item.id,
-          name: data.item.nickname || 'Пользователь',
-          age: '',
-          need: data.item.need,
-          tags: data.item.tags || [],
-          city: data.item.city || '',
-          photo_url: data.item.photo_url || ''
-        }]);
-      } else {
-        setQueue([]);
+        setProfile({
+          nickname: data.nickname || 'Пользователь',
+          about: 'Хочу поддерживать людей и делиться теплом.',
+          city: data.city || '',
+          score: data.score || 0,
+          photo_url: data.photo_url || '',
+          user_id: data.user_id
+        });
       }
     } catch (error) {
-      console.error('Ошибка загрузки очереди:', error);
-      setQueue([]);
+      console.error('Ошибка загрузки профиля:', error);
+      notify("Ошибка загрузки профиля");
     }
   };
 
+  // Загрузка следующего человека для поддержки
+  const loadNextPerson = async () => {
+    const uid = getUserId();
+    if (!uid) return;
+    
+    setLoading(true);
+    try {
+      const response = await fetch('/queue_next', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: uid })
+      });
+      
+      const data = await response.json();
+      if (data.status === 'ok') {
+        setCurrentPerson({
+          id: data.item.id,
+          name: data.item.nickname || 'Пользователь',
+          need: data.item.need,
+          tags: data.item.tags || [],
+          city: data.item.city || '',
+          photo_url: data.item.photo_url || '',
+          type: data.item.type,
+          file_id: data.item.file_id,
+          author_id: data.item.author_id
+        });
+      } else {
+        setCurrentPerson(null);
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки очереди:', error);
+      setCurrentPerson(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Первоначальная загрузка данных
+  useEffect(() => {
+    const uid = getUserId();
+    if (uid) {
+      loadProfile();
+      loadNextPerson();
+      // Имитируем подсчет сообщений за сегодня
+      setTodayCount(sentMessages.filter(msg => {
+        const today = new Date().toDateString();
+        return new Date(msg.at).toDateString() === today;
+      }).length);
+    }
+  }, []);
+
+  // Обновляем счетчик сообщений за сегодня
+  useEffect(() => {
+    const today = new Date().toDateString();
+    const count = sentMessages.filter(msg => 
+      new Date(msg.at).toDateString() === today
+    ).length;
+    setTodayCount(count);
+  }, [sentMessages]);
+
+  // Управление кнопками Telegram
   useEffect(() => {
     if (!webapp?.BackButton) return;
     const BB = webapp.BackButton;
@@ -236,47 +270,88 @@ function TelegramSupportMiniApp() {
       return () => { try { MB.offClick(handler); } catch {} };
     }
 
-    if (activeTab === "search" && queue.length > 0) {
+    if (activeTab === "search" && currentPerson) {
       MB.setText("Поддержать сейчас");
       MB.show();
       const handler = () => {
         haptic();
-        notify("Напиши тёплые слова и нажми ‘Поддержать’");
-        try { webapp?.showPopup?.({ title: "Совет", message: "Будь бережным. Короткое тёплое сообщение уже помогает." }); } catch {}
+        notify("Напиши тёплые слова и нажми 'Поддержать'");
+        try { 
+          webapp?.showPopup?.({ 
+            title: "Совет", 
+            message: "Будь бережным. Короткое тёплое сообщение уже помогает." 
+          }); 
+        } catch {}
       };
       MB.onClick(handler);
       return () => { try { MB.offClick(handler); } catch {} };
     }
-  }, [activeTab, queue.length, webapp, haptic, notify, saveProfile]);
+  }, [activeTab, currentPerson, webapp, haptic, notify]);
 
   const skipPerson = () => { 
     haptic(); 
-    const uid = tg?.initDataUnsafe?.user?.id;
-    if (uid) {
-      loadNextQueueItem(uid);
-    }
+    loadNextPerson();
     notify("Показан следующий запрос"); 
   };
 
-  const sendSupport = async (toId, text) => {
-    if (!text.trim()) { notify("Напиши сообщение"); return; }
+  const sendSupport = async (messageText) => {
+    if (!messageText.trim()) { 
+      notify("Напиши сообщение"); 
+      return; 
+    }
+
+    const uid = getUserId();
+    if (!uid) {
+      notify("Ошибка: не удалось получить ID пользователя");
+      return;
+    }
+
     haptic();
-    const msg = { toId, text: text.trim(), at: new Date().toISOString() };
-    setSent((s) => [msg, ...s]);
-    setQueue([]);
-    try { webapp?.HapticFeedback?.notificationOccurred?.("success"); } catch {}
-    notify("Отправлено ✨");
-    // backend
+    setLoading(true);
+
     try {
-      const uid = tg?.initDataUnsafe?.user?.id || 0;
-      await fetch(`/send_support`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uid, text: text.trim(), type: "text", file_id: null }) });
-    } catch {}
-    setTimeout(() => {
-      const uid = tg?.initDataUnsafe?.user?.id;
-      if (uid) {
-        loadNextQueueItem(uid);
+      const response = await fetch('/send_support', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: uid,
+          text: messageText.trim(),
+          type: "text",
+          file_id: null
+        })
+      });
+
+      const data = await response.json();
+      if (data.status === 'success') {
+        // Добавляем отправленное сообщение в локальный список
+        const msg = { 
+          toId: currentPerson?.author_id, 
+          text: messageText.trim(), 
+          at: new Date().toISOString(),
+          toName: currentPerson?.name || 'Пользователь'
+        };
+        setSentMessages(prev => [msg, ...prev]);
+        
+        // Обновляем профиль (очки могли увеличиться)
+        await loadProfile();
+        
+        setCurrentPerson(null);
+        try { webapp?.HapticFeedback?.notificationOccurred?.("success"); } catch {}
+        notify("Отправлено ✨");
+        
+        // Загружаем следующего человека через небольшую задержку
+        setTimeout(() => {
+          loadNextPerson();
+        }, 500);
+      } else {
+        notify("Ошибка отправки: " + (data.message || "неизвестная ошибка"));
       }
-    }, 300);
+    } catch (error) {
+      console.error('Ошибка отправки поддержки:', error);
+      notify("Ошибка сети");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const inviteFriend = () => {
@@ -291,7 +366,7 @@ function TelegramSupportMiniApp() {
   };
 
   const saveProfile = async () => {
-    const uid = tg?.initDataUnsafe?.user?.id;
+    const uid = getUserId();
     if (!uid) {
       notify("Ошибка: не удалось получить ID пользователя");
       return;
@@ -309,15 +384,11 @@ function TelegramSupportMiniApp() {
         })
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.status === 'success') {
-          notify("Профиль сохранён ✅");
-        } else {
-          notify("Ошибка: " + (data.message || "неизвестная ошибка"));
-        }
+      const data = await response.json();
+      if (data.status === 'success') {
+        notify("Профиль сохранён ✅");
       } else {
-        notify("Ошибка сохранения профиля");
+        notify("Ошибка: " + (data.message || "неизвестная ошибка"));
       }
     } catch (error) {
       console.error('Ошибка сохранения профиля:', error);
@@ -329,18 +400,24 @@ function TelegramSupportMiniApp() {
     <div className="screen col">
       <div className="row" style={{ justifyContent: "space-between" }}>
         <div className="row" style={{ gap: 12 }}>
-          <div className="avatar">В</div>
+          <div className="avatar">{profile.nickname.charAt(0).toUpperCase()}</div>
           <div className="col" style={{ gap: 2 }}>
-            <div style={{ fontWeight: 900, fontSize: 18 }}>Привет, Вася 👋</div>
+            <div style={{ fontWeight: 900, fontSize: 18 }}>Привет, {profile.nickname} 👋</div>
             <div className="time">Лига: {league.name}</div>
           </div>
         </div>
-        <span className="chip">v1.1</span>
+        <span className="chip">v1.2</span>
       </div>
 
       <div className="row" style={{ gap: 12 }}>
-        <div className="stat"><div className="n">{profile.score}</div><div className="l">Очков поддержки</div></div>
-        <div className="stat"><div className="n">{sent.length}</div><div className="l">Сообщений сегодня</div></div>
+        <div className="stat">
+          <div className="n">{profile.score}</div>
+          <div className="l">Очков поддержки</div>
+        </div>
+        <div className="stat">
+          <div className="n">{todayCount}</div>
+          <div className="l">Сообщений сегодня</div>
+        </div>
       </div>
 
       <div className="card col" style={{ gap: 10 }}>
@@ -352,8 +429,12 @@ function TelegramSupportMiniApp() {
           </div>
         ))}
         <div className="row" style={{ gap: 10 }}>
-          <button className="btn ok" onClick={() => { haptic(); setTab("search"); }}>Идти помогать</button>
-          <button className="btn ghost" onClick={inviteFriend}>Пригласить друга</button>
+          <button className="btn ok" onClick={() => { haptic(); setActiveTab("search"); }}>
+            Идти помогать
+          </button>
+          <button className="btn ghost" onClick={inviteFriend}>
+            Пригласить друга
+          </button>
         </div>
       </div>
     </div>
@@ -361,50 +442,114 @@ function TelegramSupportMiniApp() {
 
   const Search = () => {
     const [text, setText] = useState("");
-    const person = queue[0];
+    
+    if (loading) {
+      return (
+        <div className="screen col" style={{ alignItems: "center", justifyContent: "center" }}>
+          <div className="card col" style={{ alignItems: "center", textAlign: "center", gap: 10 }}>
+            <div style={{ fontSize: 48 }}>⏳</div>
+            <div className="title">Загрузка...</div>
+            <div className="subtitle">Ищем того, кто нуждается в поддержке</div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="screen col" style={{ gap: 12 }}>
-        {person ? (
+        {currentPerson ? (
           <>
             <div className="swipe-card">
               <div className="swipe-header">
-                <span className="swipe-badge">{person.city}</span>
-                <span className="swipe-badge">{person.tags.join(" · ")}</span>
+                <span className="swipe-badge">{currentPerson.city || "Город не указан"}</span>
+                <span className="swipe-badge">{currentPerson.type === "voice" ? "🎵 голос" : "💬 текст"}</span>
               </div>
               <div className="swipe-body">
                 <div className="row" style={{ gap: 12, alignItems: "center" }}>
-                  <div className="avatar">{person.name.charAt(0)}</div>
+                  <div className="avatar">{currentPerson.name.charAt(0).toUpperCase()}</div>
                   <div>
-                    <div className="title" style={{ margin: 0 }}>{person.name}, {person.age}</div>
+                    <div className="title" style={{ margin: 0 }}>{currentPerson.name}</div>
                     <div className="subtitle">нужна поддержка</div>
                   </div>
                 </div>
+                
                 <div className="card" style={{ background: "#fff", border: "1px solid rgba(0,0,0,.06)" }}>
-                  {person.need}
+                  {currentPerson.type === "voice" ? (
+                    <div className="row" style={{ gap: 10, alignItems: "center" }}>
+                      <span>🎧 Голосовое сообщение</span>
+                      <button 
+                        className="btn ghost" 
+                        style={{ width: "auto", minHeight: "36px", padding: "8px 12px" }}
+                        onClick={() => {
+                          // Можно добавить воспроизведение голосового сообщения
+                          notify("Воспроизведение голосовых сообщений пока недоступно в веб-версии");
+                        }}
+                      >
+                        Прослушать
+                      </button>
+                    </div>
+                  ) : (
+                    currentPerson.need || "Человек нуждается в поддержке"
+                  )}
                 </div>
+                
                 <div className="col">
                   <label className="field">
                     <span className="subtitle">Напиши короткое тёплое сообщение</span>
-                    <textarea id="support-input" className="input" rows={4} placeholder="Я рядом. Ты не один/одна. Давай по шагу за раз…" value={text} onChange={(e) => setText(e.target.value)} />
+                    <textarea 
+                      id="support-input" 
+                      className="input" 
+                      rows={4} 
+                      placeholder="Я рядом. Ты не один/одна. Давай по шагу за раз…" 
+                      value={text} 
+                      onChange={(e) => setText(e.target.value)}
+                      disabled={loading}
+                    />
                   </label>
                   <div className="col" style={{ gap: 8 }}>
-                    <button className="btn ok" onClick={() => { sendSupport(person.id, text); setText(""); }}>Поддержать</button>
+                    <button 
+                      className="btn ok" 
+                      onClick={() => { sendSupport(text); setText(""); }}
+                      disabled={loading || !text.trim()}
+                    >
+                      {loading ? "Отправляется..." : "Поддержать"}
+                    </button>
                     <div className="row" style={{ gap: 8 }}>
-                      <button className="btn skip" onClick={skipPerson}>Пропустить</button>
-                      <button className="btn ghost" onClick={() => { haptic(); share(`Поддержим ${person.name}?`, undefined); }}>Поделиться</button>
+                      <button 
+                        className="btn skip" 
+                        onClick={skipPerson}
+                        disabled={loading}
+                      >
+                        Пропустить
+                      </button>
+                      <button 
+                        className="btn ghost" 
+                        onClick={() => { 
+                          haptic(); 
+                          share(`Поддержим ${currentPerson.name}?`, undefined); 
+                        }}
+                      >
+                        Поделиться
+                      </button>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
-            <div className="subtitle">Совет: называй, что уже получилось у человека — это вселяет уверенность.</div>
+            <div className="subtitle">
+              Совет: называй, что уже получилось у человека — это вселяет уверенность.
+            </div>
           </>
         ) : (
           <div className="card col" style={{ alignItems: "center", textAlign: "center", gap: 10 }}>
             <div style={{ fontSize: 48 }}>🎉</div>
             <div className="title">Очередь пуста</div>
-            <div className="subtitle">Пока никого рядом. Проверь позже или открой «Лиги».</div>
-            <button className="btn" onClick={() => setTab("leagues")}>Открыть лиги</button>
+            <div className="subtitle">
+              Пока никого рядом. Проверь позже или открой «Лиги».
+            </div>
+            <button className="btn" onClick={() => setActiveTab("leagues")}>
+              Открыть лиги
+            </button>
           </div>
         )}
       </div>
@@ -415,23 +560,34 @@ function TelegramSupportMiniApp() {
     <div className="screen col">
       <h3 className="title">Недавняя активность</h3>
       <div className="list">
-        {sent.length === 0 && (
-          <div className="card subtitle">Пока пусто. Поддержи кого-то в «Поиске», и здесь появится история.</div>
+        {sentMessages.length === 0 && (
+          <div className="card subtitle">
+            Пока пусто. Поддержи кого-то в «Поиске», и здесь появится история.
+          </div>
         )}
-        {sent.map((m, i) => {
-          const p = samplePeople.find((x) => x.id === m.toId);
-          return (
-            <div key={i} className="list-item" onClick={() => { navigator.clipboard?.writeText(m.text).then(()=>notify("Сообщение скопировано")); }}>
-              <div className="avatar">{p?.name?.charAt(0) || "?"}</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 800 }}>{p?.name || "Пользователь"}</div>
-                <div className="time">{new Date(m.at).toLocaleString()}</div>
-                <div style={{ marginTop: 6, color: "var(--hint)" }}>{m.text}</div>
-              </div>
-              <button className="btn ghost" style={{ width: 120 }} onClick={(e)=>{ e.stopPropagation(); haptic(); setTab("search"); }}>Ответить ещё</button>
+        {sentMessages.map((m, i) => (
+          <div key={i} className="list-item" onClick={() => { 
+            navigator.clipboard?.writeText(m.text).then(()=>notify("Сообщение скопировано")); 
+          }}>
+            <div className="avatar">{m.toName?.charAt(0)?.toUpperCase() || "?"}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800 }}>{m.toName || "Пользователь"}</div>
+              <div className="time">{new Date(m.at).toLocaleString()}</div>
+              <div style={{ marginTop: 6, color: "var(--hint)" }}>{m.text}</div>
             </div>
-          );
-        })}
+            <button 
+              className="btn ghost" 
+              style={{ width: 120 }} 
+              onClick={(e)=>{ 
+                e.stopPropagation(); 
+                haptic(); 
+                setActiveTab("search"); 
+              }}
+            >
+              Ответить ещё
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -450,14 +606,19 @@ function TelegramSupportMiniApp() {
               <div style={{ width: 18, height: 18, borderRadius: 5, background: l.color }} />
               <button className="btn ghost" style={{ width: 96 }} onClick={() => {
                 haptic();
-                const top = [
-                  { nick: "@kindheart", score: 812 },
-                  { nick: "@helper", score: 553 },
-                  { nick: "@warm_words", score: 412 },
-                ];
-                const msg = top.map((t,i)=> `${i+1}. ${t.nick} — ${t.score}`).join("\n");
-                try { tg?.showPopup?.({ title: "Топ недели", message: msg, buttons:[{type:'close'}]}); } catch { alert(msg); }
-              }}>Топ</button>
+                const msg = "Топ лидеров пока недоступен. Следите за обновлениями!";
+                try { 
+                  webapp?.showPopup?.({ 
+                    title: "Топ недели", 
+                    message: msg, 
+                    buttons:[{type:'close'}]
+                  }); 
+                } catch { 
+                  alert(msg); 
+                }
+              }}>
+                Топ
+              </button>
             </div>
           </div>
         ))}
@@ -467,13 +628,24 @@ function TelegramSupportMiniApp() {
         <div className="row" style={{ justifyContent: "space-between" }}>
           <div>
             <div className="title" style={{ margin: 0 }}>Твой рейтинг</div>
-            <div className="subtitle">Ты в {league.name.toLowerCase()}. До следующей лиги: {Math.max(0, leagues.find(l=>l.id==="gold").from - profile.score)} очков</div>
+            <div className="subtitle">
+              Ты в {league.name.toLowerCase()}. 
+              {league.id !== "platinum" && (
+                <span> До следующей лиги: {
+                  Math.max(0, leagues.find(l => l.from > league.from)?.from - profile.score || 0)
+                } очков</span>
+              )}
+            </div>
           </div>
           <div className="chip">{profile.score} очков</div>
         </div>
         <div className="row" style={{ gap: 10, marginTop: 10 }}>
-          <button className="btn" onClick={() => setTab("search")}>Поддержать кого‑то</button>
-          <button className="btn ghost" onClick={inviteFriend}>Поделиться мини‑приложением</button>
+          <button className="btn" onClick={() => setActiveTab("search")}>
+            Поддержать кого‑то
+          </button>
+          <button className="btn ghost" onClick={inviteFriend}>
+            Поделиться мини‑приложением
+          </button>
         </div>
       </div>
     </div>
@@ -483,13 +655,15 @@ function TelegramSupportMiniApp() {
     <div className="screen col" style={{ gap: 12 }}>
       <h3 className="title">Профиль</h3>
       <div className="row" style={{ gap: 12 }}>
-        <div className="avatar" style={{ width: 64, height: 64, fontSize: 24 }}>В</div>
+        <div className="avatar" style={{ width: 64, height: 64, fontSize: 24 }}>
+          {profile.nickname.charAt(0).toUpperCase()}
+        </div>
         <div className="col" style={{ gap: 6 }}>
           <div className="row" style={{ gap: 8, alignItems: "center" }}>
             <span style={{ fontWeight:900, fontSize:18 }}>@{profile.nickname}</span>
             <span className="chip">{league.name}</span>
           </div>
-          <span className="time">Город: {profile.city}</span>
+          <span className="time">Город: {profile.city || "не указан"}</span>
         </div>
       </div>
 
@@ -515,16 +689,29 @@ function TelegramSupportMiniApp() {
 
       <label className="field">
         <span className="subtitle">О себе</span>
-        <textarea className="input" rows={4} value={profile.about} onChange={(e) => setProfile({ ...profile, about: e.target.value })} />
+        <textarea 
+          className="input" 
+          rows={4} 
+          value={profile.about} 
+          onChange={(e) => setProfile({ ...profile, about: e.target.value })} 
+        />
       </label>
 
       <div className="col" style={{ gap: 8 }}>
-        <button className="btn" onClick={() => { haptic(); share("Мой профиль в Support Mini App"); }}>Поделиться профилем</button>
-        <button className="btn ghost" onClick={openSettings}>Настройки</button>
+        <button className="btn" onClick={() => { haptic(); share("Мой профиль в Support Mini App"); }}>
+          Поделиться профилем
+        </button>
+        <button className="btn ghost" onClick={openSettings}>
+          Настройки
+        </button>
       </div>
 
       <div className="divider" />
-      <div className="subtitle">initData: {tg?.initDataUnsafe ? "получено" : "нет"} · платформа: {tg?.platform || "web"}</div>
+      <div className="subtitle">
+        User ID: {profile.user_id || getUserId() || "не определен"} · 
+        initData: {tg?.initDataUnsafe ? "получено" : "нет"} · 
+        платформа: {tg?.platform || "web"}
+      </div>
     </div>
   );
 
@@ -536,7 +723,7 @@ function TelegramSupportMiniApp() {
       {activeTab === "notifications" && <Notifications />}
       {activeTab === "leagues" && <Leagues />}
       {activeTab === "profile" && <Profile />}
-      <BottomTabs tab={activeTab} setTab={(t)=>{ haptic(); setActiveTab(t); }} />
+      <BottomTabs activeTab={activeTab} setActiveTab={(t)=>{ haptic(); setActiveTab(t); }} />
     </div>
   );
 }
@@ -549,5 +736,3 @@ if (typeof window !== "undefined") {
     ReactDOM.createRoot(rootEl).render(React.createElement(TelegramSupportMiniApp));
   }
 }
-
-
