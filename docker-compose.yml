@@ -20,7 +20,7 @@ services:
     depends_on:
       - db
     ports:
-      - "8000:8000"
+      - "8080:8080"
 
   bot:
     build:
@@ -32,7 +32,7 @@ services:
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - BACKEND_PUBLIC_URL=${BACKEND_PUBLIC_URL}
-      - BACKEND_URL=http://backend:8000
+      - BACKEND_URL=http://backend:8080
     env_file:
       - ./.env
 

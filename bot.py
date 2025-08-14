@@ -11,8 +11,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8234250977:AAFSjY7Ci-xajOeB-JqRgWB2vTVtQaW9UCc")
 # Public HTTPS URL to open inside Telegram WebApp (e.g. Cloudflare/Ngrok tunnel to http://localhost:8000)
-BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "https://xh3l8y-78-36-243-206.ru.tuna.am")
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8080")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8080")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())

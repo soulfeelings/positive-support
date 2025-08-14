@@ -114,10 +114,10 @@ const BottomTabs = ({ tab, setTab }) => {
       {items.map((i) => (
         <button
           key={i.key}
-          className={"tab" + (tab === i.key ? " active" : "")}
-          onClick={() => setTab(i.key)}
+          className={"tab" + (activeTab === i.key ? " active" : "")}
+          onClick={() => setActiveTab(i.key)}
           role="tab"
-          aria-selected={tab === i.key}
+          aria-selected={activeTab === i.key}
         >
           <div className="ico" aria-hidden> {i.icon} </div>
           <div>{i.label}</div>
@@ -129,10 +129,10 @@ const BottomTabs = ({ tab, setTab }) => {
 
 function TelegramSupportMiniApp() {
   const { webapp, haptic, notify, share } = useTelegram();
-  const [tab, setTab] = useState("home");
-  const [queue, setQueue] = useState(samplePeople);
+  const [activeTab, setActiveTab] = useState("home");
+  const [queue, setQueue] = useState([]);
   const [sent, setSent] = useState([]);
-  const [profile, setProfile] = useState({ nickname: "vasya", about: "Хочу поддерживать людей и делиться теплом.", city: "Берлин", score: 135 });
+  const [profile, setProfile] = useState({ nickname: "vasya", about: "", city: "", score: 0, photo_url: "" });
 
   const league = useMemo(() => leagues.find((l) => profile.score >= l.from && profile.score <= l.to) || leagues[0], [profile.score]);
 
@@ -144,18 +144,83 @@ function TelegramSupportMiniApp() {
     } catch {}
   }, [webapp]);
 
+  // Загружаем профиль и первый элемент очереди из API
+  useEffect(() => {
+    const uid = tg?.initDataUnsafe?.user?.id;
+    if (!uid) return;
+    
+    const loadProfileAndQueue = async () => {
+      try {
+        // Загружаем профиль
+        const profileResponse = await fetch('/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: uid })
+        });
+        
+        if (profileResponse.ok) {
+          const profileData = await profileResponse.json();
+          if (profileData.status === 'ok') {
+            setProfile({
+              nickname: profileData.nickname || 'Пользователь',
+              about: 'Хочу поддерживать людей и делиться теплом.',
+              city: profileData.city || '',
+              score: profileData.score || 0,
+              photo_url: profileData.photo_url || ''
+            });
+          }
+        }
+        
+        // Загружаем первый элемент очереди
+        await loadNextQueueItem(uid);
+      } catch (error) {
+        console.error('Ошибка загрузки данных:', error);
+      }
+    };
+    
+    loadProfileAndQueue();
+  }, [tg]);
+
+  const loadNextQueueItem = async (userId) => {
+    try {
+      const response = await fetch('/queue_next', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId })
+      });
+      
+      const data = await response.json();
+      if (data.status === 'ok') {
+        setQueue([{
+          id: data.item.id,
+          name: data.item.nickname || 'Пользователь',
+          age: '',
+          need: data.item.need,
+          tags: data.item.tags || [],
+          city: data.item.city || '',
+          photo_url: data.item.photo_url || ''
+        }]);
+      } else {
+        setQueue([]);
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки очереди:', error);
+      setQueue([]);
+    }
+  };
+
   useEffect(() => {
     if (!webapp?.BackButton) return;
     const BB = webapp.BackButton;
-    if (tab !== "home") {
+    if (activeTab !== "home") {
       BB.show();
-      const handler = () => setTab("home");
+      const handler = () => setActiveTab("home");
       BB.onClick(handler);
       return () => { try { BB.offClick(handler); } catch {} };
     } else {
       BB.hide();
     }
-  }, [tab, webapp]);
+  }, [activeTab, webapp]);
 
   useEffect(() => {
     const MB = webapp?.MainButton;
@@ -163,15 +228,15 @@ function TelegramSupportMiniApp() {
     MB.hide();
     MB.enable?.();
 
-    if (tab === "profile") {
+    if (activeTab === "profile") {
       MB.setText("Сохранить профиль");
       MB.show();
-      const handler = () => { haptic(); notify("Профиль сохранён ✅"); };
+      const handler = () => { haptic(); saveProfile(); };
       MB.onClick(handler);
       return () => { try { MB.offClick(handler); } catch {} };
     }
 
-    if (tab === "search" && queue.length > 0) {
+    if (activeTab === "search" && queue.length > 0) {
       MB.setText("Поддержать сейчас");
       MB.show();
       const handler = () => {
@@ -182,22 +247,36 @@ function TelegramSupportMiniApp() {
       MB.onClick(handler);
       return () => { try { MB.offClick(handler); } catch {} };
     }
-  }, [tab, queue.length, webapp, haptic, notify]);
+  }, [activeTab, queue.length, webapp, haptic, notify, saveProfile]);
 
-  const skipPerson = () => {
-    haptic();
-    setQueue((q) => (q.length > 1 ? [...q.slice(1), q[0]] : q));
-    notify("Показан следующий запрос");
+  const skipPerson = () => { 
+    haptic(); 
+    const uid = tg?.initDataUnsafe?.user?.id;
+    if (uid) {
+      loadNextQueueItem(uid);
+    }
+    notify("Показан следующий запрос"); 
   };
 
-  const sendSupport = (toId, text) => {
+  const sendSupport = async (toId, text) => {
     if (!text.trim()) { notify("Напиши сообщение"); return; }
     haptic();
     const msg = { toId, text: text.trim(), at: new Date().toISOString() };
     setSent((s) => [msg, ...s]);
-    setQueue((q) => q.filter((p) => p.id !== toId));
+    setQueue([]);
     try { webapp?.HapticFeedback?.notificationOccurred?.("success"); } catch {}
     notify("Отправлено ✨");
+    // backend
+    try {
+      const uid = tg?.initDataUnsafe?.user?.id || 0;
+      await fetch(`/send_support`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uid, text: text.trim(), type: "text", file_id: null }) });
+    } catch {}
+    setTimeout(() => {
+      const uid = tg?.initDataUnsafe?.user?.id;
+      if (uid) {
+        loadNextQueueItem(uid);
+      }
+    }, 300);
   };
 
   const inviteFriend = () => {
@@ -209,6 +288,41 @@ function TelegramSupportMiniApp() {
     haptic();
     if (webapp?.openLink) return webapp.openLink("https://t.me/BotFather");
     alert("Настройки — демо");
+  };
+
+  const saveProfile = async () => {
+    const uid = tg?.initDataUnsafe?.user?.id;
+    if (!uid) {
+      notify("Ошибка: не удалось получить ID пользователя");
+      return;
+    }
+
+    try {
+      const response = await fetch('/set_nickname', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: uid,
+          nickname: profile.nickname,
+          city: profile.city,
+          photo_url: profile.photo_url
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === 'success') {
+          notify("Профиль сохранён ✅");
+        } else {
+          notify("Ошибка: " + (data.message || "неизвестная ошибка"));
+        }
+      } else {
+        notify("Ошибка сохранения профиля");
+      }
+    } catch (error) {
+      console.error('Ошибка сохранения профиля:', error);
+      notify("Ошибка сети");
+    }
   };
 
   const Home = () => (
@@ -380,6 +494,26 @@ function TelegramSupportMiniApp() {
       </div>
 
       <label className="field">
+        <span className="subtitle">Никнейм</span>
+        <input 
+          className="input" 
+          value={profile.nickname} 
+          onChange={(e) => setProfile({ ...profile, nickname: e.target.value })}
+          placeholder="Введите никнейм"
+        />
+      </label>
+
+      <label className="field">
+        <span className="subtitle">Город</span>
+        <input 
+          className="input" 
+          value={profile.city} 
+          onChange={(e) => setProfile({ ...profile, city: e.target.value })}
+          placeholder="Введите город"
+        />
+      </label>
+
+      <label className="field">
         <span className="subtitle">О себе</span>
         <textarea className="input" rows={4} value={profile.about} onChange={(e) => setProfile({ ...profile, about: e.target.value })} />
       </label>
@@ -397,12 +531,12 @@ function TelegramSupportMiniApp() {
   return (
     <div className="wrap">
       <AppStyles />
-      {tab === "home" && <Home />}
-      {tab === "search" && <Search />}
-      {tab === "notifications" && <Notifications />}
-      {tab === "leagues" && <Leagues />}
-      {tab === "profile" && <Profile />}
-      <BottomTabs tab={tab} setTab={(t)=>{ haptic(); setTab(t); }} />
+      {activeTab === "home" && <Home />}
+      {activeTab === "search" && <Search />}
+      {activeTab === "notifications" && <Notifications />}
+      {activeTab === "leagues" && <Leagues />}
+      {activeTab === "profile" && <Profile />}
+      <BottomTabs tab={activeTab} setTab={(t)=>{ haptic(); setActiveTab(t); }} />
     </div>
   );
 }
