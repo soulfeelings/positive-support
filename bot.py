@@ -4,366 +4,395 @@ import logging
 import aiohttp
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 # Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8234250977:AAFSjY7Ci-xajOeB-JqRgWB2vTVtQaW9UCc")
-# Public HTTPS URL to open inside Telegram WebApp (e.g. Cloudflare/Ngrok tunnel)
-BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "https://your-domain.com")
+BOT_TOKEN = "8234250977:AAFSjY7Ci-xajOeB-JqRgWB2vTVtQaW9UCc"
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 if not BOT_TOKEN:
-    logger.error("BOT_TOKEN environment variable is not set!")
+    logger.error("BOT_TOKEN not set!")
     exit(1)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-class SendStates(StatesGroup):
-    waiting_support = State()
+class UserStates(StatesGroup):
     waiting_nickname = State()
+    waiting_message = State()
+    viewing_help_request = State()
 
-# Клавиатуры
+# Главная клавиатура
 main_kb = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text="💌 Отправить поддержку")],
-    [KeyboardButton(text="🔥 Получить поддержку")],
-    [KeyboardButton(text="🌐 Открыть мини-приложение")]
+    [KeyboardButton(text="💌 Отправить поддержку"), KeyboardButton(text="🔥 Получить поддержку")],
+    [KeyboardButton(text="🆘 Нужна помощь"), KeyboardButton(text="🤝 Помочь кому-нибудь")],
+    [KeyboardButton(text="👤 Профиль")]
 ], resize_keyboard=True)
 
-def webapp_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="🚀 Открыть мини‑приложение", 
-            web_app=WebAppInfo(url=f"{BACKEND_PUBLIC_URL}/")
-        )
-    ]])
+# Inline клавиатура для запросов помощи
+def get_help_inline_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="❤️ Помочь", callback_data="help_respond"),
+            InlineKeyboardButton(text="➡️ Дальше", callback_data="help_next")
+        ],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="help_menu")]
+    ])
 
-async def make_request(endpoint: str, data: dict):
-    """Выполняет HTTP запрос к бэкенду с обработкой ошибок"""
+
+
+def escape_markdown(text: str) -> str:
+    """Экранирует специальные символы для Markdown"""
+    if not text:
+        return text
+    return text.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]').replace('`', '\\`')
+
+async def api_request(endpoint: str, data: dict):
+    """Простой HTTP запрос к API"""
     try:
-        timeout = aiohttp.ClientTimeout(total=10)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession() as session:
             async with session.post(f"{BACKEND_URL}/{endpoint}", json=data) as response:
-                if response.status == 200:
                     return await response.json()
-                else:
-                    logger.error(f"HTTP {response.status} error for {endpoint}: {await response.text()}")
-                    return {"status": "error", "message": f"HTTP {response.status}"}
-    except aiohttp.ClientError as e:
-        logger.error(f"Network error for {endpoint}: {e}")
-        return {"status": "error", "message": "Ошибка сети"}
     except Exception as e:
-        logger.error(f"Unexpected error for {endpoint}: {e}")
-        return {"status": "error", "message": "Неизвестная ошибка"}
+        logger.error(f"API error: {e}")
+        return {"status": "error"}
 
 @dp.message(Command("start"))
 async def start(message: types.Message, state: FSMContext):
-    """Команда /start - приветствие и начало работы"""
+    """Команда старт"""
     user_id = message.from_user.id
-    logger.info(f"User {user_id} started the bot")
     
-    # Проверяем, есть ли пользователь в базе
-    profile_response = await make_request("profile", {"user_id": user_id})
+    # Проверяем профиль
+    profile = await api_request("profile", {"user_id": user_id})
     
-    if profile_response.get("status") == "ok":
-        # Пользователь уже зарегистрирован
+    if profile.get("status") == "ok" and profile.get("nickname"):
+        nickname = profile.get('nickname')
         await message.answer(
-            f"👋 С возвращением, {profile_response.get('nickname', 'друг')}!\n\n"
-            "🌟 Выбери, что хочешь сделать:",
+            f"👋 Привет, {nickname}!\nВыбери действие:",
             reply_markup=main_kb
         )
         await state.clear()
     else:
-        # Новый пользователь
         await message.answer(
-            "👋 Привет! Это бот поддержки.\n\n"
-            "💝 Здесь можно:\n"
-            "• Отправить поддержку тому, кто в ней нуждается\n"
-            "• Получить тёплые слова, когда нужно\n\n"
-            "🎯 Сначала придумай себе уникальный никнейм (только буквы и цифры):",
-            reply_markup=webapp_kb()
+            "👋 Добро пожаловать!\nВведи свой никнейм (3-20 символов):"
         )
-        await state.set_state(SendStates.waiting_nickname)
+        await state.set_state(UserStates.waiting_nickname)
 
-@dp.message(SendStates.waiting_nickname)
+@dp.message(UserStates.waiting_nickname)
 async def handle_nickname(message: types.Message, state: FSMContext):
-    """Обработка установки никнейма"""
+    """Установка никнейма"""
     nickname = message.text.strip()
 
-    if not nickname or len(nickname) < 3:
-        await message.answer("❌ Никнейм должен быть не короче 3 символов. Попробуй снова:")
+    if len(nickname) < 3 or len(nickname) > 20:
+        await message.answer("❌ Никнейм должен быть 3-20 символов:")
         return
 
-    if not nickname.replace('_', '').isalnum():
-        await message.answer("❌ Ник должен содержать только буквы, цифры и подчеркивание. Попробуй снова:")
-        return
-
-    if len(nickname) > 20:
-        await message.answer("❌ Никнейм слишком длинный (максимум 20 символов). Попробуй снова:")
-        return
-
-    user_data = {
+    logger.info(f"Attempting to set nickname '{nickname}' for user {message.from_user.id}")
+    
+    result = await api_request("set_nickname", {
         "user_id": message.from_user.id,
         "nickname": nickname
-    }
+    })
     
-    # Добавляем дополнительную информацию если доступна
-    if message.from_user.first_name:
-        user_data["photo_url"] = ""  # Можно добавить логику получения фото профиля
+    logger.info(f"Set nickname result: {result}")
     
-    response = await make_request("set_nickname", user_data)
-
-    if response.get("status") == "success":
-        await message.answer(
-            f"✅ Отлично! Никнейм '{nickname}' установлен!\n\n"
-            "🌟 Теперь можешь пользоваться ботом. Выбери действие:",
-            reply_markup=main_kb
-        )
+    if result.get("status") == "success":
+        await message.answer(f"✅ Никнейм {nickname} установлен!", reply_markup=main_kb)
         await state.clear()
-        logger.info(f"Nickname '{nickname}' set for user {message.from_user.id}")
+        logger.info(f"✅ Nickname '{nickname}' successfully set for user {message.from_user.id}")
     else:
-        error_msg = response.get("message", "неизвестная ошибка")
-        if "already taken" in error_msg.lower():
-            await message.answer("⚠️ Такой ник уже занят. Попробуй другой:")
-        else:
-            await message.answer(f"❌ Ошибка: {error_msg}\nПопробуй другой никнейм:")
+        error_msg = result.get("message", "неизвестная ошибка")
+        logger.warning(f"❌ Failed to set nickname '{nickname}' for user {message.from_user.id}: {error_msg}")
+        await message.answer(f"❌ Ошибка: {error_msg}. Попробуй другой никнейм:")
 
 @dp.message(F.text == "💌 Отправить поддержку")
 async def send_support(message: types.Message, state: FSMContext):
-    """Начало отправки сообщения поддержки"""
-    await message.answer(
-        "💝 Отправь текст или голосовое сообщение:\n\n"
-        "💡 Совет: короткие тёплые слова часто помогают больше длинных речей"
-    )
-    await state.set_state(SendStates.waiting_support)
+    """Отправить поддержку"""
+    await message.answer("💝 Напиши сообщение поддержки:")
+    await state.set_state(UserStates.waiting_message)
+    await state.update_data(action="support")
 
-@dp.message(SendStates.waiting_support)
-async def handle_support_message(message: types.Message, state: FSMContext):
-    """Обработка сообщения поддержки"""
+@dp.message(F.text == "🆘 Нужна помощь")
+async def need_help(message: types.Message, state: FSMContext):
+    """Запросить помощь"""
+    await message.answer(
+        "💭 Расскажи, что случилось?\n\n"
+        "📝 Можешь написать текстом или записать голосовое сообщение"
+    )
+    await state.set_state(UserStates.waiting_message)
+    await state.update_data(action="help")
+
+@dp.message(UserStates.waiting_message)
+async def handle_message(message: types.Message, state: FSMContext):
+    """Обработка текстовых и голосовых сообщений"""
+    data = await state.get_data()
+    action = data.get("action")
+    
+    # Определяем тип сообщения и данные
     if message.voice:
-        payload = {
+        message_data = {
             "user_id": message.from_user.id,
             "text": None,
             "file_id": message.voice.file_id,
-            "type": "voice"
+            "message_type": "voice"
         }
-        content_type = "голосовое сообщение"
+        content_description = "голосовое сообщение"
     elif message.text:
-        if len(message.text.strip()) < 5:
-            await message.answer("❌ Сообщение слишком короткое. Напиши что-то более содержательное:")
-            return
-        payload = {
+        message_data = {
             "user_id": message.from_user.id,
-            "text": message.text.strip(),
+            "text": message.text,
             "file_id": None,
-            "type": "text"
+            "message_type": "text"
         }
-        content_type = "текстовое сообщение"
+        content_description = "сообщение"
     else:
-        await message.answer("❌ Отправь текст или голосовое сообщение.")
+        await message.answer("❌ Пожалуйста, отправь текст или голосовое сообщение", reply_markup=main_kb)
+        await state.clear()
         return
-
-    response = await make_request("send_support", payload)
     
-    if response.get("status") == "success":
-        await message.answer(
-            f"✅ {content_type.capitalize()} отправлено!\n\n"
-            "🌟 Твоя поддержка поможет кому-то почувствовать себя лучше.\n"
-            "💎 +1 очко к твоему рейтингу!",
-            reply_markup=main_kb
-        )
-        logger.info(f"Support message sent by user {message.from_user.id}")
+    # Отправляем в зависимости от действия
+    if action == "support":
+        help_recipient = data.get("help_recipient")
+        
+        if help_recipient:
+            # Отправляем ответ конкретному человеку
+            result = await api_request("send_support", message_data)
+            if result.get("status") == "success":
+                # Экранируем никнейм для Markdown
+                safe_recipient_nickname = escape_markdown(help_recipient['nickname'])
+                await message.answer(
+                    f"✅ {content_description.capitalize()} отправлено пользователю **{safe_recipient_nickname}**!\n\n"
+                    f"💝 Твоя поддержка поможет этому человеку.",
+                    reply_markup=main_kb,
+                    parse_mode='Markdown'
+                )
+        
+                # Отправляем сообщение получателю
+                try:
+                    if message_data["message_type"] == "voice":
+                        await bot.send_voice(
+                            chat_id=help_recipient["user_id"],
+                            voice=message_data["file_id"],
+                            caption="💝 Для тебя пришло сообщение поддержки!\n\n🤗 Кто-то откликнулся на твой запрос."
+                        )
+                    else:
+                        # Экранируем текст для Markdown
+                        safe_message_text = escape_markdown(message_data['text'])
+                        await bot.send_message(
+                            chat_id=help_recipient["user_id"],
+                            text=f"💝 Для тебя пришло сообщение поддержки!\n\n"
+                                 f"💬 _{safe_message_text}_\n\n"
+                                 f"🤗 Кто-то откликнулся на твой запрос. Надеемся, это поможет!",
+                            parse_mode='Markdown'
+                        )
+                    logger.info(f"Help response delivered from {message.from_user.id} to {help_recipient['user_id']}")
+                    
+                    # Удаляем запрос помощи из базы данных
+                    delete_result = await api_request("delete_help_request", {
+                        "request_id": help_recipient["id"],
+                        "user_id": help_recipient["user_id"]
+                    })
+                    if delete_result.get("status") == "success":
+                        logger.info(f"Help request {help_recipient['id']} deleted after response")
+                    else:
+                        logger.warning(f"Failed to delete help request {help_recipient['id']}")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to deliver help response: {e}")
+                    await message.answer("⚠️ Сообщение сохранено, но возникла проблема с доставкой.")
+            else:
+                await message.answer("❌ Ошибка отправки", reply_markup=main_kb)
+        else:
+            # Обычная поддержка в общий пул
+            result = await api_request("send_support", message_data)
+            if result.get("status") == "success":
+                await message.answer(f"✅ {content_description.capitalize()} поддержки отправлено!", reply_markup=main_kb)
+            else:
+                await message.answer("❌ Ошибка отправки", reply_markup=main_kb)
+    
+    elif action == "help":
+        result = await api_request("send_request", message_data)
+        if result.get("status") == "success":
+            await message.answer(
+                f"✅ Твой запрос о помощи ({content_description}) отправлен!\n\n"
+                "🤗 Кто-то из сообщества обязательно откликнется и поможет тебе.", 
+                reply_markup=main_kb
+            )
+            logger.info(f"Help request sent: user_id={message.from_user.id}, type={message_data['message_type']}")
     else:
-        error_msg = response.get('message', 'неизвестная ошибка')
-        await message.answer(f"❌ Ошибка отправки: {error_msg}")
-        logger.error(f"Failed to send support message: {error_msg}")
+            await message.answer("❌ Ошибка отправки", reply_markup=main_kb)
     
     await state.clear()
 
 @dp.message(F.text == "🔥 Получить поддержку")
 async def get_support(message: types.Message):
-    """Получение сообщения поддержки"""
-    user_id = message.from_user.id
-    response = await make_request("get_support", {"user_id": user_id})
-
-    if response.get("status") == "text":
-        await message.answer(
-            f"💬 {response['message']}\n\n"
-            f"👤 От: {response['nickname']}\n\n"
-            "❤️ Надеемся, это помогло!"
-        )
-        logger.info(f"Text support delivered to user {user_id}")
-        
-    elif response.get("status") == "voice":
-        try:
-            await bot.send_voice(
-                chat_id=message.chat.id,
-                voice=response["file_id"],
-                caption=f"🎧 Голосовое сообщение от: {response['nickname']}\n\n❤️ Надеемся, это помогло!"
-            )
-            logger.info(f"Voice support delivered to user {user_id}")
-        except Exception as e:
-            logger.error(f"Failed to send voice message: {e}")
-            await message.answer("❌ Не удалось воспроизвести голосовое сообщение")
-            
-    elif response.get("status") == "no_messages":
-        await message.answer(
-            "😔 Пока нет доступных сообщений поддержки.\n\n"
-            "💡 Попробуй:\n"
-            "• Проверить позже\n"
-            "• Отправить свою поддержку — так в системе станет больше добрых слов!"
-        )
+    """Получить поддержку"""
+    result = await api_request("get_support", {"user_id": message.from_user.id})
+    
+    if result.get("status") == "text":
+        await message.answer(f"💬 {result['message']}\n\n👤 От: {result['nickname']}")
     else:
-        error_msg = response.get("message", "неизвестная ошибка")
-        await message.answer(f"❌ Ошибка получения поддержки: {error_msg}")
-        logger.error(f"Failed to get support: {error_msg}")
+        await message.answer("😔 Пока нет сообщений поддержки")
 
-@dp.message(F.text == "🌐 Открыть мини-приложение")
-async def open_webapp(message: types.Message):
-    """Открытие веб-приложения"""
-    await message.answer(
-        "🚀 Нажми кнопку ниже, чтобы открыть мини-приложение с расширенным функционалом:",
-        reply_markup=webapp_kb()
-    )
+@dp.message(F.text == "🤝 Помочь кому-нибудь")
+async def help_someone(message: types.Message, state: FSMContext):
+    """Показать случайный запрос помощи"""
+    result = await api_request("get_help_request", {"user_id": message.from_user.id})
+    
+    if result.get("status") == "ok":
+        request_data = result["request"]
+        
+        # Сохраняем данные запроса в состоянии
+        await state.update_data(current_request=request_data)
+        await state.set_state(UserStates.viewing_help_request)
+        
+        # Формируем сообщение в зависимости от типа
+        if request_data["message_type"] == "voice":
+            # Отправляем голосовое сообщение
+            try:
+                # Экранируем никнейм для Markdown
+                safe_request_nickname = escape_markdown(request_data['nickname'])
+                await bot.send_voice(
+                    chat_id=message.chat.id,
+                    voice=request_data["file_id"],
+                    caption=f"🆘 **{safe_request_nickname}** просит помощи:\n\n❤️ Хочешь помочь этому человеку?",
+                    parse_mode='Markdown',
+                    reply_markup=get_help_inline_kb()
+                )
+            except Exception as e:
+                logger.error(f"Failed to send voice: {e}")
+                # Экранируем никнейм для Markdown
+                safe_request_nickname = escape_markdown(request_data['nickname'])
+                await message.answer(
+                    f"🆘 **{safe_request_nickname}** просит помощи:\n\n"
+                    f"🎤 _Голосовое сообщение (не удалось воспроизвести)_\n\n"
+                    f"❤️ Хочешь помочь этому человеку?",
+                    reply_markup=get_help_inline_kb(),
+                    parse_mode='Markdown'
+                )
+        else:
+            # Отправляем текстовое сообщение
+            # Экранируем никнейм и текст для Markdown
+            safe_request_nickname = escape_markdown(request_data['nickname'])
+            safe_request_text = escape_markdown(request_data['text'])
+            await message.answer(
+                f"🆘 **{safe_request_nickname}** просит помощи:\n\n"
+                f"💭 _{safe_request_text}_\n\n"
+                f"❤️ Хочешь помочь этому человеку?",
+                reply_markup=get_help_inline_kb(),
+                parse_mode='Markdown'
+            )
+    else:
+        await message.answer(
+            "😇 Пока никто не просит помощи!\n\n"
+            "✨ Проверь позже.",
+            reply_markup=main_kb
+        )
+
+@dp.message(F.text == "👤 Профиль")
+async def show_profile(message: types.Message):
+    """Показать профиль пользователя"""
+    user_id = message.from_user.id
+    
+    # Получаем профиль пользователя
+    profile = await api_request("profile", {"user_id": user_id})
+    
+    if profile.get("status") == "ok":
+        nickname = profile.get("nickname", "Неизвестно")
+        
+        # Экранируем специальные символы в никнейме для Markdown
+        safe_nickname = escape_markdown(nickname)
+        
+        profile_text = f"""👤 **Твой профиль**
+
+📛 Никнейм: **{safe_nickname}**
+⭐ Рейтинг: _временно не доступно_
+🏆 Лига: _временно не доступно_
+📊 Статус: _временно не доступно_
+
+💌 Отправлено сообщений: _временно не доступно_
+🤝 Помогли людям: _временно не доступно_"""
+        
+        await message.answer(
+            profile_text,
+            parse_mode='Markdown'
+        )
+        logger.info(f"Profile shown for user {user_id}: {nickname}")
+    else:
+        await message.answer(
+            "❌ Не удалось загрузить профиль.\n"
+            "Возможно, ты не зарегистрирован. Используй /start",
+            reply_markup=main_kb
+        )
 
 @dp.message(Command("help"))
 async def help_command(message: types.Message):
-    """Справка по использованию бота"""
-    help_text = """
-🆘 **Справка по боту поддержки**
-
-🔹 **💌 Отправить поддержку** - отправь текст или голосовое сообщение тому, кто нуждается в поддержке
-
-🔹 **🔥 Получить поддержку** - получи тёплое сообщение от другого пользователя
-
-🔹 **🌐 Мини-приложение** - полнофункциональный интерфейс с рейтингом, лигами и историей
-
-**Как это работает?**
-1️⃣ Ты отправляешь поддержку
-2️⃣ Она попадает в общую очередь  
-3️⃣ Другие пользователи получают твои слова
-4️⃣ За каждое сообщение ты получаешь очки
-5️⃣ Очки помогают подняться в лигах рейтинга
-
-💡 **Совет**: короткие искренние слова часто помогают лучше длинных советов
-    """
-    
-    await message.answer(help_text, parse_mode='Markdown')
-
-@dp.message(Command("stats"))
-async def stats_command(message: types.Message):
-    """Показать статистику пользователя"""
-    user_id = message.from_user.id
-    response = await make_request("profile", {"user_id": user_id})
-    
-    if response.get("status") == "ok":
-        score = response.get("score", 0)
-        nickname = response.get("nickname", "Неизвестный")
-        city = response.get("city", "не указан")
-        
-        # Определяем лигу
-        leagues = [
-            ("🥉 Бронзовая", 0, 49),
-            ("🥈 Серебряная", 50, 199), 
-            ("🥇 Золотая", 200, 499),
-            ("💎 Платиновая", 500, 9999)
-        ]
-        
-        current_league = "🥉 Бронзовая"
-        for league_name, min_score, max_score in leagues:
-            if min_score <= score <= max_score:
-                current_league = league_name
-                break
-        
-        stats_text = f"""
-📊 **Твоя статистика**
-
-👤 Никнейм: {nickname}
-🏙️ Город: {city}
-💎 Очки: {score}
-🏆 Лига: {current_league}
-
-💌 Отправлено сообщений поддержки: {score}
-        """
-        
-        await message.answer(stats_text, parse_mode='Markdown')
-    else:
-        await message.answer("❌ Не удалось получить статистику. Возможно, ты не зарегистрирован.")
-
-@dp.message(Command("profile"))
-async def profile_command(message: types.Message):
-    """Показать профиль пользователя и предложить его редактировать"""
+    """Справка"""
     await message.answer(
-        "👤 Для управления профилем используй мини-приложение - там есть полный функционал редактирования:",
-        reply_markup=webapp_kb()
+        "🆘 **Справка:**\n\n"
+        "💌 Отправить поддержку - помочь кому-то\n"
+        "🔥 Получить поддержку - получить добрые слова\n"
+        "🆘 Нужна помощь - попросить поддержку\n"
+        "🤝 Помочь кому-нибудь - ответить на чей-то запрос помощи\n"
+        "👤 Профиль - посмотреть свою статистику",
+        parse_mode='Markdown'
     )
 
-# Обработчик неизвестных команд и сообщений
+@dp.callback_query(F.data == "help_respond")
+async def handle_help_respond(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка кнопки 'Помочь'"""
+    data = await state.get_data()
+    current_request = data.get("current_request")
+    
+    if current_request:
+        # Экранируем никнейм для Markdown
+        safe_current_nickname = escape_markdown(current_request['nickname'])
+        await callback.message.answer(
+            f"💝 Напиши сообщение поддержки для **{safe_current_nickname}**:\n\n"
+            "💡 Совет: короткие искренние слова часто помогают больше длинных советов\n\n"
+            "ℹ️ _После твоего ответа запрос будет удален из очереди_",
+            parse_mode='Markdown'
+        )
+        # Переводим в состояние написания сообщения поддержки
+        await state.set_state(UserStates.waiting_message)
+        await state.update_data(action="support", help_recipient=current_request)
+    else:
+        await callback.message.answer("❌ Ошибка: данные запроса потеряны", reply_markup=main_kb)
+        await state.clear()
+    
+    await callback.answer()
+
+@dp.callback_query(F.data == "help_next")
+async def handle_help_next(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка кнопки 'Дальше'"""
+    # Показываем следующий запрос
+    await help_someone(callback.message, state)
+    await callback.answer()
+
+@dp.callback_query(F.data == "help_menu")
+async def handle_help_menu(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка кнопки 'Главное меню'"""
+    await callback.message.answer("🏠 Главное меню", reply_markup=main_kb)
+    await state.clear()
+    await callback.answer()
+
+
+
 @dp.message()
-async def unknown_message(message: types.Message):
-    """Обработка неизвестных сообщений"""
-    await message.answer(
-        "🤔 Не понимаю эту команду.\n\n"
-        "Используй кнопки меню или команды:\n"
-        "• /help - справка\n"
-        "• /stats - твоя статистика\n"
-        "• /profile - управление профилем",
-        reply_markup=main_kb
-    )
-
-async def on_startup():
-    """Действия при запуске бота"""
-    logger.info("Bot is starting...")
-    
-    # Проверяем подключение к бэкенду
-    health_response = await make_request("health", {})
-    if health_response.get("status") == "healthy":
-        logger.info("Backend connection: OK")
-    else:
-        logger.warning(f"Backend connection issues: {health_response}")
-    
-    # Устанавливаем команды бота
-    commands = [
-        types.BotCommand(command="start", description="🚀 Начать работу"),
-        types.BotCommand(command="help", description="🆘 Справка"),
-        types.BotCommand(command="stats", description="📊 Моя статистика"),
-        types.BotCommand(command="profile", description="👤 Мой профиль"),
-    ]
-    
-    await bot.set_my_commands(commands)
-    logger.info("Bot commands set successfully")
-
-async def on_shutdown():
-    """Действия при остановке бота"""
-    logger.info("Bot is shutting down...")
+async def unknown(message: types.Message):
+    """Неизвестные сообщения"""
+    await message.answer("🤔 Используй кнопки меню", reply_markup=main_kb)
 
 async def main():
-    """Главная функция запуска бота"""
-    try:
-        await on_startup()
-        logger.info("Starting bot polling...")
-        await dp.start_polling(bot, skip_updates=True)
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-    finally:
-        await on_shutdown()
+    """Запуск бота"""
+    logger.info("Starting bot...")
+    await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Program interrupted by user")
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        exit(1)
+    asyncio.run(main())
