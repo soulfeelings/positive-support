@@ -58,7 +58,7 @@ async def setup_database():
                 user_id BIGINT REFERENCES users(user_id),
                 text TEXT,
                 file_id TEXT,
-                message_type VARCHAR(20) NOT NULL DEFAULT 'text' CHECK (message_type IN ('text', 'voice')),
+                message_type VARCHAR(20) NOT NULL DEFAULT 'text' CHECK (message_type IN ('text', 'voice', 'video_note')),
                 type VARCHAR(20) NOT NULL CHECK (type IN ('support', 'request')),
                 created_at TIMESTAMP DEFAULT NOW()
             )

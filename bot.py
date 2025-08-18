@@ -27,6 +27,7 @@ class UserStates(StatesGroup):
     waiting_nickname = State()
     waiting_message = State()
     viewing_help_request = State()
+    changing_nickname = State()
 
 # Главная клавиатура
 main_kb = ReplyKeyboardMarkup(keyboard=[
@@ -45,6 +46,12 @@ def get_help_inline_kb():
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="help_menu")]
     ])
 
+# Inline клавиатура для профиля
+def get_profile_inline_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")]
+    ])
+
 
 
 def escape_markdown(text: str) -> str:
@@ -58,14 +65,20 @@ async def api_request(endpoint: str, data: dict):
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{BACKEND_URL}/{endpoint}", json=data) as response:
-                    return await response.json()
+                if response.status != 200:
+                    logger.error(f"API returned status {response.status} for {endpoint}")
+                    return {"status": "error", "message": f"HTTP {response.status}"}
+                result = await response.json()
+                logger.info(f"API {endpoint} response: {result}")
+                return result
     except Exception as e:
-        logger.error(f"API error: {e}")
-        return {"status": "error"}
+        logger.error(f"API error for {endpoint}: {e}")
+        return {"status": "error", "message": str(e)}
 
 @dp.message(Command("start"))
 async def start(message: types.Message, state: FSMContext):
     """Команда старт"""
+    await state.clear()
     user_id = message.from_user.id
     
     # Проверяем профиль
@@ -73,15 +86,45 @@ async def start(message: types.Message, state: FSMContext):
     
     if profile.get("status") == "ok" and profile.get("nickname"):
         nickname = profile.get('nickname')
+        welcome_text = f"""👋 **Добро пожаловать в бот поддержки, {escape_markdown(nickname)}!**
+
+🤝 **Что умеет этот бот:**
+• 💌 Отправлять сообщения поддержки другим людям
+• 🔥 Получать слова поддержки от сообщества  
+• 🆘 Просить помощи в трудные моменты
+• 🤝 Помогать тем, кому нужна поддержка
+• ⭐ Зарабатывать рейтинг за помощь другим
+
+💝 **Здесь ты найдешь:**
+• Добрые слова и поддержку
+• Понимание и сочувствие
+• Возможность помочь другим
+• Дружелюбное сообщество
+
+🌟 Выбери действие в меню ниже:"""
+
         await message.answer(
-            f"👋 Привет, {nickname}!\nВыбери действие:",
-            reply_markup=main_kb
+            welcome_text,
+            reply_markup=main_kb,
+            parse_mode='Markdown'
         )
-        await state.clear()
     else:
-        await message.answer(
-            "👋 Добро пожаловать!\nВведи свой никнейм (3-20 символов):"
-        )
+        welcome_text = """👋 **Добро пожаловать в бот поддержки!**
+
+🤝 **Здесь ты можешь:**
+• 💌 Отправлять и получать поддержку
+• 🆘 Просить помощи когда тяжело
+• 🤝 Помогать другим людям
+• ⭐ Зарабатывать рейтинг за добрые дела
+
+💝 **Это место, где:**
+• Тебя поймут и поддержат
+• Можно помочь тем, кому трудно
+• Царит атмосфера добра и взаимопомощи
+
+🎯 **Для начала введи свой никнейм (3-20 символов):**"""
+
+        await message.answer(welcome_text, parse_mode='Markdown')
         await state.set_state(UserStates.waiting_nickname)
 
 @dp.message(UserStates.waiting_nickname)
@@ -111,9 +154,44 @@ async def handle_nickname(message: types.Message, state: FSMContext):
         logger.warning(f"❌ Failed to set nickname '{nickname}' for user {message.from_user.id}: {error_msg}")
         await message.answer(f"❌ Ошибка: {error_msg}. Попробуй другой никнейм:")
 
+@dp.message(UserStates.changing_nickname)
+async def handle_nickname_change(message: types.Message, state: FSMContext):
+    """Смена никнейма"""
+    nickname = message.text.strip()
+
+    if len(nickname) < 3 or len(nickname) > 20:
+        await message.answer("❌ Никнейм должен быть 3-20 символов. Попробуй еще раз:")
+        return
+
+    logger.info(f"Attempting to change nickname to '{nickname}' for user {message.from_user.id}")
+    
+    result = await api_request("set_nickname", {
+        "user_id": message.from_user.id,
+        "nickname": nickname
+    })
+    
+    logger.info(f"Change nickname result: {result}")
+    
+    if result.get("status") == "success":
+        await message.answer(
+            f"✅ Никнейм успешно изменен на **{escape_markdown(nickname)}**!",
+            reply_markup=main_kb,
+            parse_mode='Markdown'
+        )
+        await state.clear()
+        logger.info(f"✅ Nickname successfully changed to '{nickname}' for user {message.from_user.id}")
+    else:
+        error_msg = result.get("message", "неизвестная ошибка")
+        logger.warning(f"❌ Failed to change nickname to '{nickname}' for user {message.from_user.id}: {error_msg}")
+        if "already taken" in error_msg.lower() or "занят" in error_msg.lower():
+            await message.answer(f"❌ Никнейм **{escape_markdown(nickname)}** уже занят. Попробуй другой:", parse_mode='Markdown')
+        else:
+            await message.answer(f"❌ Ошибка: {error_msg}. Попробуй другой никнейм:")
+
 @dp.message(F.text == "💌 Отправить поддержку")
 async def send_support(message: types.Message, state: FSMContext):
     """Отправить поддержку"""
+    await state.clear()
     await message.answer("💝 Напиши сообщение поддержки:")
     await state.set_state(UserStates.waiting_message)
     await state.update_data(action="support")
@@ -121,16 +199,17 @@ async def send_support(message: types.Message, state: FSMContext):
 @dp.message(F.text == "🆘 Нужна помощь")
 async def need_help(message: types.Message, state: FSMContext):
     """Запросить помощь"""
+    await state.clear()
     await message.answer(
         "💭 Расскажи, что случилось?\n\n"
-        "📝 Можешь написать текстом или записать голосовое сообщение"
+        "📝 Можешь написать текстом, записать голосовое сообщение или отправить видео кружок"
     )
     await state.set_state(UserStates.waiting_message)
     await state.update_data(action="help")
 
 @dp.message(UserStates.waiting_message)
 async def handle_message(message: types.Message, state: FSMContext):
-    """Обработка текстовых и голосовых сообщений"""
+    """Обработка текстовых, голосовых сообщений и видео кружков"""
     data = await state.get_data()
     action = data.get("action")
     
@@ -143,7 +222,21 @@ async def handle_message(message: types.Message, state: FSMContext):
             "message_type": "voice"
         }
         content_description = "голосовое сообщение"
+    elif message.video_note:
+        message_data = {
+            "user_id": message.from_user.id,
+            "text": None,
+            "file_id": message.video_note.file_id,
+            "message_type": "video_note"
+        }
+        content_description = "видео кружок"
     elif message.text:
+        # Проверяем что это не команда кнопки меню
+        if message.text in ["👤 Профиль", "💌 Отправить поддержку", "🔥 Получить поддержку", "🆘 Нужна помощь", "🤝 Помочь кому-нибудь"]:
+            await state.clear()
+            await message.answer("🤔 Используй кнопки меню", reply_markup=main_kb)
+            return
+            
         message_data = {
             "user_id": message.from_user.id,
             "text": message.text,
@@ -152,7 +245,7 @@ async def handle_message(message: types.Message, state: FSMContext):
         }
         content_description = "сообщение"
     else:
-        await message.answer("❌ Пожалуйста, отправь текст или голосовое сообщение", reply_markup=main_kb)
+        await message.answer("❌ Пожалуйста, отправь текст, голосовое сообщение или видео кружок", reply_markup=main_kb)
         await state.clear()
         return
     
@@ -163,6 +256,7 @@ async def handle_message(message: types.Message, state: FSMContext):
         if help_recipient:
             # Отправляем ответ конкретному человеку
             result = await api_request("send_support", message_data)
+            logger.info(f"Send support API result: {result}")
             if result.get("status") == "success":
                 # Экранируем никнейм для Markdown
                 safe_recipient_nickname = escape_markdown(help_recipient['nickname'])
@@ -181,6 +275,15 @@ async def handle_message(message: types.Message, state: FSMContext):
                             voice=message_data["file_id"],
                             caption="💝 Для тебя пришло сообщение поддержки!\n\n🤗 Кто-то откликнулся на твой запрос."
                         )
+                    elif message_data["message_type"] == "video_note":
+                        await bot.send_video_note(
+                            chat_id=help_recipient["user_id"],
+                            video_note=message_data["file_id"]
+                        )
+                        await bot.send_message(
+                            chat_id=help_recipient["user_id"],
+                            text="💝 Для тебя пришло сообщение поддержки!\n\n🤗 Кто-то откликнулся на твой запрос."
+                        )
                     else:
                         # Экранируем текст для Markdown
                         safe_message_text = escape_markdown(message_data['text'])
@@ -192,6 +295,14 @@ async def handle_message(message: types.Message, state: FSMContext):
                             parse_mode='Markdown'
                         )
                     logger.info(f"Help response delivered from {message.from_user.id} to {help_recipient['user_id']}")
+                    
+                    # Увеличиваем рейтинг пользователя за помощь
+                    rating_result = await api_request("increment_rating", {"user_id": message.from_user.id})
+                    if rating_result.get("status") == "success":
+                        new_rating = rating_result.get("new_rating", 0)
+                        logger.info(f"Rating incremented for user {message.from_user.id}, new rating: {new_rating}")
+                    else:
+                        logger.warning(f"Failed to increment rating for user {message.from_user.id}")
                     
                     # Удаляем запрос помощи из базы данных
                     delete_result = await api_request("delete_help_request", {
@@ -218,6 +329,7 @@ async def handle_message(message: types.Message, state: FSMContext):
     
     elif action == "help":
         result = await api_request("send_request", message_data)
+        logger.info(f"Send request API result: {result}")
         if result.get("status") == "success":
             await message.answer(
                 f"✅ Твой запрос о помощи ({content_description}) отправлен!\n\n"
@@ -225,14 +337,15 @@ async def handle_message(message: types.Message, state: FSMContext):
                 reply_markup=main_kb
             )
             logger.info(f"Help request sent: user_id={message.from_user.id}, type={message_data['message_type']}")
-    else:
+        else:
             await message.answer("❌ Ошибка отправки", reply_markup=main_kb)
     
     await state.clear()
 
 @dp.message(F.text == "🔥 Получить поддержку")
-async def get_support(message: types.Message):
+async def get_support(message: types.Message, state: FSMContext):
     """Получить поддержку"""
+    await state.clear()
     result = await api_request("get_support", {"user_id": message.from_user.id})
     
     if result.get("status") == "text":
@@ -243,6 +356,11 @@ async def get_support(message: types.Message):
 @dp.message(F.text == "🤝 Помочь кому-нибудь")
 async def help_someone(message: types.Message, state: FSMContext):
     """Показать случайный запрос помощи"""
+    await state.clear()
+    await show_help_request_simple(message, state)
+
+async def show_help_request_simple(message: types.Message, state: FSMContext):
+    """Показать запрос помощи (упрощенная функция)"""
     result = await api_request("get_help_request", {"user_id": message.from_user.id})
     
     if result.get("status") == "ok":
@@ -276,6 +394,31 @@ async def help_someone(message: types.Message, state: FSMContext):
                     reply_markup=get_help_inline_kb(),
                     parse_mode='Markdown'
                 )
+        elif request_data["message_type"] == "video_note":
+            # Отправляем видео кружок
+            try:
+                # Экранируем никнейм для Markdown
+                safe_request_nickname = escape_markdown(request_data['nickname'])
+                await bot.send_video_note(
+                    chat_id=message.chat.id,
+                    video_note=request_data["file_id"]
+                )
+                await message.answer(
+                    f"🆘 **{safe_request_nickname}** просит помощи:\n\n❤️ Хочешь помочь этому человеку?",
+                    reply_markup=get_help_inline_kb(),
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                logger.error(f"Failed to send video note: {e}")
+                # Экранируем никнейм для Markdown
+                safe_request_nickname = escape_markdown(request_data['nickname'])
+                await message.answer(
+                    f"🆘 **{safe_request_nickname}** просит помощи:\n\n"
+                    f"🎥 _Видео кружок (не удалось воспроизвести)_\n\n"
+                    f"❤️ Хочешь помочь этому человеку?",
+                    reply_markup=get_help_inline_kb(),
+                    parse_mode='Markdown'
+                )
         else:
             # Отправляем текстовое сообщение
             # Экранируем никнейм и текст для Markdown
@@ -296,8 +439,11 @@ async def help_someone(message: types.Message, state: FSMContext):
         )
 
 @dp.message(F.text == "👤 Профиль")
-async def show_profile(message: types.Message):
+async def show_profile(message: types.Message, state: FSMContext):
     """Показать профиль пользователя"""
+    # Очищаем состояние чтобы не было конфликтов
+    await state.clear()
+    
     user_id = message.from_user.id
     
     # Получаем профиль пользователя
@@ -305,23 +451,35 @@ async def show_profile(message: types.Message):
     
     if profile.get("status") == "ok":
         nickname = profile.get("nickname", "Неизвестно")
+        rating = profile.get("rating", 0)
         
         # Экранируем специальные символы в никнейме для Markdown
         safe_nickname = escape_markdown(nickname)
         
+        # Определяем лигу по рейтингу
+        if rating < 20:
+            league = "_нет лиги_"
+        elif rating < 50:
+            league = "🥉 **Бронзовая лига**"
+        elif rating < 100:
+            league = "🥈 **Серебряная лига**"
+        else:
+            league = "🥇 **Золотая лига**"
+        
         profile_text = f"""👤 **Твой профиль**
 
 📛 Никнейм: **{safe_nickname}**
-⭐ Рейтинг: _временно не доступно_
-🏆 Лига: _временно не доступно_
+⭐ Рейтинг: **{rating}**
+🏆 Лига: {league}
 📊 Статус: _временно не доступно_
 
 💌 Отправлено сообщений: _временно не доступно_
-🤝 Помогли людям: _временно не доступно_"""
+🤝 Помогли людям: **{rating}**"""
         
         await message.answer(
             profile_text,
-            parse_mode='Markdown'
+            parse_mode='Markdown',
+            reply_markup=get_profile_inline_kb()
         )
         logger.info(f"Profile shown for user {user_id}: {nickname}")
     else:
@@ -371,8 +529,24 @@ async def handle_help_respond(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "help_next")
 async def handle_help_next(callback: types.CallbackQuery, state: FSMContext):
     """Обработка кнопки 'Дальше'"""
+    # Удаляем последние 2 сообщения (видео кружок + текст или просто текст + предыдущий текст)
+    try:
+        # Получаем ID текущего сообщения с кнопками
+        current_message_id = callback.message.message_id
+        
+        # Удаляем текущее сообщение
+        await bot.delete_message(chat_id=callback.message.chat.id, message_id=current_message_id)
+        logger.info(f"Deleted current help message {current_message_id}")
+        
+        # Удаляем предыдущее сообщение (может быть видео кружок)
+        await bot.delete_message(chat_id=callback.message.chat.id, message_id=current_message_id - 1)
+        logger.info(f"Deleted previous message {current_message_id - 1}")
+        
+    except Exception as e:
+        logger.warning(f"Failed to delete previous messages: {e}")
+    
     # Показываем следующий запрос
-    await help_someone(callback.message, state)
+    await show_help_request_simple(callback.message, state)
     await callback.answer()
 
 @dp.callback_query(F.data == "help_menu")
@@ -382,11 +556,24 @@ async def handle_help_menu(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer()
 
+@dp.callback_query(F.data == "change_nickname")
+async def handle_change_nickname(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка кнопки 'Сменить никнейм'"""
+    await callback.message.answer(
+        "✏️ **Смена никнейма**\n\n"
+        "Введи новый никнейм (3-20 символов):\n\n"
+        "💡 _Никнейм должен быть уникальным_",
+        parse_mode='Markdown'
+    )
+    await state.set_state(UserStates.changing_nickname)
+    await callback.answer()
+
 
 
 @dp.message()
-async def unknown(message: types.Message):
+async def unknown(message: types.Message, state: FSMContext):
     """Неизвестные сообщения"""
+    await state.clear()
     await message.answer("🤔 Используй кнопки меню", reply_markup=main_kb)
 
 async def main():

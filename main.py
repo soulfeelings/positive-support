@@ -48,7 +48,7 @@ class Message(BaseModel):
     user_id: int
     text: Optional[str] = None
     file_id: Optional[str] = None
-    message_type: str = "text"  # "text" или "voice"
+    message_type: str = "text"  # "text", "voice" или "video_note"
 
 # API эндпоинты
 @app.get("/")
@@ -118,18 +118,32 @@ async def get_profile(data: UserProfile):
             "SELECT user_id, nickname FROM users WHERE user_id = $1", 
             data.user_id
         )
+        
+        # Получаем рейтинг из таблицы ratings
+        try:
+            rating_row = await conn.fetchrow(
+                "SELECT rating FROM ratings WHERE user_id = $1", 
+                data.user_id
+            )
+            rating = rating_row["rating"] if rating_row else 0
+        except:
+            rating = 0
+        
         await conn.close()
         
         if user:
             return {
                 "status": "ok",
                 "user_id": user["user_id"],
-                "nickname": user["nickname"]
+                "nickname": user["nickname"],
+                "rating": rating
             }
         else:
             return {"status": "not_found"}
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"Error in get_profile: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return {"status": "error"}
 
 @app.post("/send_support")
@@ -243,6 +257,33 @@ async def delete_help_request(data: dict):
         
     except Exception as e:
         logger.error(f"Error deleting help request: {e}")
+        return {"status": "error"}
+
+@app.post("/increment_rating")
+async def increment_rating(data: UserProfile):
+    """Увеличение рейтинга пользователя на +1"""
+    try:
+        conn = await get_connection()
+        
+        # Увеличиваем рейтинг на 1, создаем запись если ее нет
+        await conn.execute("""
+            INSERT INTO ratings (user_id, rating) VALUES ($1, 1)
+            ON CONFLICT (user_id) DO UPDATE SET rating = ratings.rating + 1
+        """, data.user_id)
+        
+        # Получаем новый рейтинг
+        new_rating = await conn.fetchval(
+            "SELECT rating FROM ratings WHERE user_id = $1", 
+            data.user_id
+        )
+        
+        await conn.close()
+        
+        logger.info(f"✅ Rating incremented for user {data.user_id}, new rating: {new_rating}")
+        return {"status": "success", "new_rating": new_rating}
+        
+    except Exception as e:
+        logger.error(f"Error incrementing rating: {e}")
         return {"status": "error"}
 
 @app.get("/health")

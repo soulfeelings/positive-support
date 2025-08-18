@@ -21,42 +21,58 @@ async def check_database():
         print("=" * 50)
         
         # Проверяем пользователей
-        users = await conn.fetch("SELECT user_id, nickname, created_at FROM users ORDER BY created_at")
+        users = await conn.fetch("SELECT user_id, nickname FROM users ORDER BY user_id")
         print(f"👥 Пользователи ({len(users)}):")
         for user in users:
-            print(f"  • {user['nickname']} (ID: {user['user_id']}) - {user['created_at']}")
+            print(f"  • {user['nickname']} (ID: {user['user_id']})")
         
         print()
         
         # Проверяем сообщения поддержки
         support_msgs = await conn.fetch("""
-            SELECT m.id, m.text, m.message_type, u.nickname, m.created_at 
+            SELECT m.id, m.text, m.message_type, u.nickname 
             FROM messages m 
             JOIN users u ON m.user_id = u.user_id 
             WHERE m.type = 'support' 
-            ORDER BY m.created_at DESC
+            ORDER BY m.id DESC
         """)
         print(f"💝 Сообщения поддержки ({len(support_msgs)}):")
         for msg in support_msgs:
             text = msg['text'][:50] + "..." if msg['text'] and len(msg['text']) > 50 else msg['text']
-            msg_type = "🎤" if msg['message_type'] == 'voice' else "📝"
-            print(f"  • {msg_type} {msg['nickname']}: {text or '[голосовое]'}")
+            if msg['message_type'] == 'voice':
+                msg_type = "🎤"
+                content = text or '[голосовое]'
+            elif msg['message_type'] == 'video_note':
+                msg_type = "🎥"
+                content = text or '[видео кружок]'
+            else:
+                msg_type = "📝"
+                content = text or '[текст]'
+            print(f"  • {msg_type} {msg['nickname']}: {content}")
         
         print()
         
         # Проверяем запросы помощи
         help_requests = await conn.fetch("""
-            SELECT m.id, m.text, m.message_type, u.nickname, m.created_at 
+            SELECT m.id, m.text, m.message_type, u.nickname 
             FROM messages m 
             JOIN users u ON m.user_id = u.user_id 
             WHERE m.type = 'request' 
-            ORDER BY m.created_at DESC
+            ORDER BY m.id DESC
         """)
         print(f"🆘 Запросы помощи ({len(help_requests)}):")
         for req in help_requests:
             text = req['text'][:50] + "..." if req['text'] and len(req['text']) > 50 else req['text']
-            msg_type = "🎤" if req['message_type'] == 'voice' else "📝"
-            print(f"  • {msg_type} {req['nickname']}: {text or '[голосовое]'}")
+            if req['message_type'] == 'voice':
+                msg_type = "🎤"
+                content = text or '[голосовое]'
+            elif req['message_type'] == 'video_note':
+                msg_type = "🎥"
+                content = text or '[видео кружок]'
+            else:
+                msg_type = "📝"
+                content = text or '[текст]'
+            print(f"  • {msg_type} {req['nickname']}: {content}")
         
         print()
         
