@@ -43,7 +43,10 @@ def get_help_inline_kb():
             InlineKeyboardButton(text="❤️ Помочь", callback_data="help_respond"),
             InlineKeyboardButton(text="➡️ Дальше", callback_data="help_next")
         ],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="help_menu")]
+        [
+            InlineKeyboardButton(text="🏠 Главное меню", callback_data="help_menu"),
+            InlineKeyboardButton(text="❌ Пожаловаться", callback_data="help_complaint")
+        ]
     ])
 
 # Inline клавиатура для профиля
@@ -59,6 +62,41 @@ def escape_markdown(text: str) -> str:
     if not text:
         return text
     return text.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]').replace('`', '\\`')
+
+async def check_user_blocked(user_id: int) -> bool:
+    """Проверяет заблокирован ли пользователь"""
+    try:
+        profile = await api_request("profile", {"user_id": user_id})
+        return profile.get("status") == "ok" and profile.get("is_blocked", False)
+    except Exception as e:
+        logger.error(f"Error checking user block status: {e}")
+        return False
+
+async def send_blocked_message(message: types.Message):
+    """Отправляет сообщение о блокировке"""
+    blocked_text = """🚫 **Доступ заблокирован**
+
+К сожалению, ваш аккаунт заблокирован за нарушение правил сообщества.
+
+📞 **Для разблокировки обратитесь к администрации**
+
+ℹ️ _Блокировка может быть связана с:_
+• Нарушением правил сообщества
+• Множественными жалобами на ваши сообщения
+• Неподобающим поведением"""
+    
+    await message.answer(blocked_text, parse_mode='Markdown')
+
+async def send_blocked_callback(callback: types.CallbackQuery):
+    """Отправляет сообщение о блокировке для callback"""
+    blocked_text = """🚫 **Доступ заблокирован**
+
+К сожалению, ваш аккаунт заблокирован за нарушение правил сообщества.
+
+📞 **Для разблокировки обратитесь к администрации**"""
+    
+    await callback.message.answer(blocked_text, parse_mode='Markdown')
+    await callback.answer()
 
 async def api_request(endpoint: str, data: dict):
     """Простой HTTP запрос к API"""
@@ -83,6 +121,11 @@ async def start(message: types.Message, state: FSMContext):
     
     # Проверяем профиль
     profile = await api_request("profile", {"user_id": user_id})
+    
+    # Проверяем черный список
+    if await check_user_blocked(user_id):
+        await send_blocked_message(message)
+        return
     
     if profile.get("status") == "ok" and profile.get("nickname"):
         nickname = profile.get('nickname')
@@ -130,6 +173,11 @@ async def start(message: types.Message, state: FSMContext):
 @dp.message(UserStates.waiting_nickname)
 async def handle_nickname(message: types.Message, state: FSMContext):
     """Установка никнейма"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        await state.clear()
+        return
+    
     nickname = message.text.strip()
 
     if len(nickname) < 3 or len(nickname) > 20:
@@ -157,6 +205,11 @@ async def handle_nickname(message: types.Message, state: FSMContext):
 @dp.message(UserStates.changing_nickname)
 async def handle_nickname_change(message: types.Message, state: FSMContext):
     """Смена никнейма"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        await state.clear()
+        return
+    
     nickname = message.text.strip()
 
     if len(nickname) < 3 or len(nickname) > 20:
@@ -191,6 +244,10 @@ async def handle_nickname_change(message: types.Message, state: FSMContext):
 @dp.message(F.text == "💌 Отправить поддержку")
 async def send_support(message: types.Message, state: FSMContext):
     """Отправить поддержку"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        return
+    
     await state.clear()
     await message.answer("💝 Напиши сообщение поддержки:")
     await state.set_state(UserStates.waiting_message)
@@ -199,6 +256,10 @@ async def send_support(message: types.Message, state: FSMContext):
 @dp.message(F.text == "🆘 Нужна помощь")
 async def need_help(message: types.Message, state: FSMContext):
     """Запросить помощь"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        return
+    
     await state.clear()
     await message.answer(
         "💭 Расскажи, что случилось?\n\n"
@@ -210,6 +271,11 @@ async def need_help(message: types.Message, state: FSMContext):
 @dp.message(UserStates.waiting_message)
 async def handle_message(message: types.Message, state: FSMContext):
     """Обработка текстовых, голосовых сообщений и видео кружков"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        await state.clear()
+        return
+    
     data = await state.get_data()
     action = data.get("action")
     
@@ -345,6 +411,10 @@ async def handle_message(message: types.Message, state: FSMContext):
 @dp.message(F.text == "🔥 Получить поддержку")
 async def get_support(message: types.Message, state: FSMContext):
     """Получить поддержку"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        return
+    
     await state.clear()
     result = await api_request("get_support", {"user_id": message.from_user.id})
     
@@ -356,6 +426,10 @@ async def get_support(message: types.Message, state: FSMContext):
 @dp.message(F.text == "🤝 Помочь кому-нибудь")
 async def help_someone(message: types.Message, state: FSMContext):
     """Показать случайный запрос помощи"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        return
+    
     await state.clear()
     await show_help_request_simple(message, state)
 
@@ -441,6 +515,10 @@ async def show_help_request_simple(message: types.Message, state: FSMContext):
 @dp.message(F.text == "👤 Профиль")
 async def show_profile(message: types.Message, state: FSMContext):
     """Показать профиль пользователя"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        return
+    
     # Очищаем состояние чтобы не было конфликтов
     await state.clear()
     
@@ -452,6 +530,7 @@ async def show_profile(message: types.Message, state: FSMContext):
     if profile.get("status") == "ok":
         nickname = profile.get("nickname", "Неизвестно")
         rating = profile.get("rating", 0)
+        complaints_count = profile.get("complaints_count", 0)
         
         # Экранируем специальные символы в никнейме для Markdown
         safe_nickname = escape_markdown(nickname)
@@ -466,15 +545,30 @@ async def show_profile(message: types.Message, state: FSMContext):
         else:
             league = "🥇 **Золотая лига**"
         
+        # Определяем статус по количеству жалоб
+        if complaints_count == 0:
+            status_icon = "✅"
+            status_text = "_отличная репутация_"
+        elif complaints_count <= 2:
+            status_icon = "⚠️"
+            status_text = "_внимание к контенту_"
+        elif complaints_count <= 5:
+            status_icon = "🔴"
+            status_text = "_множественные жалобы_"
+        else:
+            status_icon = "🚫"
+            status_text = "_критическая репутация_"
+        
         profile_text = f"""👤 **Твой профиль**
 
 📛 Никнейм: **{safe_nickname}**
 ⭐ Рейтинг: **{rating}**
 🏆 Лига: {league}
-📊 Статус: _временно не доступно_
+📊 Статус: {status_icon} {status_text}
 
 💌 Отправлено сообщений: _временно не доступно_
-🤝 Помогли людям: **{rating}**"""
+🤝 Помогли людям: **{rating}**
+🚨 Жалобы на вас: **{complaints_count}**"""
         
         await message.answer(
             profile_text,
@@ -492,6 +586,10 @@ async def show_profile(message: types.Message, state: FSMContext):
 @dp.message(Command("help"))
 async def help_command(message: types.Message):
     """Справка"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        return
+    
     await message.answer(
         "🆘 **Справка:**\n\n"
         "💌 Отправить поддержку - помочь кому-то\n"
@@ -505,6 +603,10 @@ async def help_command(message: types.Message):
 @dp.callback_query(F.data == "help_respond")
 async def handle_help_respond(callback: types.CallbackQuery, state: FSMContext):
     """Обработка кнопки 'Помочь'"""
+    if await check_user_blocked(callback.from_user.id):
+        await send_blocked_callback(callback)
+        return
+    
     data = await state.get_data()
     current_request = data.get("current_request")
     
@@ -529,6 +631,10 @@ async def handle_help_respond(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "help_next")
 async def handle_help_next(callback: types.CallbackQuery, state: FSMContext):
     """Обработка кнопки 'Дальше'"""
+    if await check_user_blocked(callback.from_user.id):
+        await send_blocked_callback(callback)
+        return
+    
     # Удаляем последние 2 сообщения (видео кружок + текст или просто текст + предыдущий текст)
     try:
         # Получаем ID текущего сообщения с кнопками
@@ -552,13 +658,87 @@ async def handle_help_next(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "help_menu")
 async def handle_help_menu(callback: types.CallbackQuery, state: FSMContext):
     """Обработка кнопки 'Главное меню'"""
+    if await check_user_blocked(callback.from_user.id):
+        await send_blocked_callback(callback)
+        return
+    
     await callback.message.answer("🏠 Главное меню", reply_markup=main_kb)
     await state.clear()
+    await callback.answer()
+
+@dp.callback_query(F.data == "help_complaint")
+async def handle_help_complaint(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка кнопки 'Пожаловаться'"""
+    data = await state.get_data()
+    current_request = data.get("current_request")
+    
+    if current_request:
+        # Отправляем жалобу через API
+        complaint_data = {
+            "request_id": current_request['id'],
+            "complainer_user_id": callback.from_user.id
+        }
+        
+        logger.info(f"🚨 Submitting complaint for message {current_request['id']} by user {callback.from_user.id}")
+        
+        response = await api_request("submit_complaint", complaint_data)
+        
+        if response and response.get("status") == "success":
+            complaints_count = response.get("complaints_count", 0)
+            auto_blocked = response.get("auto_blocked", False)
+            
+            if auto_blocked:
+                message_text = f"""🚨 **Жалоба подана**
+
+Спасибо за обращение! Ваша жалоба рассмотрена.
+
+🚫 **Пользователь автоматически заблокирован**
+📊 Общее количество жалоб: **{complaints_count}**
+
+💡 _Сообщение удалено из общей ленты_
+🛡️ _Пользователь больше не сможет пользоваться ботом_"""
+            else:
+                message_text = f"""🚨 **Жалоба подана**
+
+Спасибо за обращение! Мы рассмотрим ваше сообщение.
+
+📊 Количество жалоб на этого пользователя: **{complaints_count}**
+
+💡 _Сообщение удалено из общей ленты_"""
+            
+            await callback.message.answer(
+                message_text,
+                parse_mode='Markdown',
+                reply_markup=main_kb
+            )
+            
+            if auto_blocked:
+                logger.warning(f"🚫 User auto-blocked notification sent for message {current_request['id']}, total complaints: {complaints_count}")
+            else:
+                logger.info(f"✅ Complaint successfully submitted for message {current_request['id']}, total complaints: {complaints_count}")
+        else:
+            await callback.message.answer(
+                "❌ **Ошибка**\n\n"
+                "Не удалось подать жалобу. Попробуйте позже.",
+                parse_mode='Markdown',
+                reply_markup=main_kb
+            )
+            logger.error(f"❌ Failed to submit complaint for message {current_request['id']}")
+        
+        await state.clear()
+    else:
+        await callback.message.answer("❌ Ошибка: данные сообщения потеряны", reply_markup=main_kb)
+        await state.clear()
+    
     await callback.answer()
 
 @dp.callback_query(F.data == "change_nickname")
 async def handle_change_nickname(callback: types.CallbackQuery, state: FSMContext):
     """Обработка кнопки 'Сменить никнейм'"""
+    if await check_user_blocked(callback.from_user.id):
+        await send_blocked_callback(callback)
+        return
+    
     await callback.message.answer(
         "✏️ **Смена никнейма**\n\n"
         "Введи новый никнейм (3-20 символов):\n\n"
@@ -573,6 +753,10 @@ async def handle_change_nickname(callback: types.CallbackQuery, state: FSMContex
 @dp.message()
 async def unknown(message: types.Message, state: FSMContext):
     """Неизвестные сообщения"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        return
+    
     await state.clear()
     await message.answer("🤔 Используй кнопки меню", reply_markup=main_kb)
 
