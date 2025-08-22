@@ -88,8 +88,11 @@ start_process() {
     
     log "Starting $process_name..."
     
-    # Запускаем процесс в фоне
-    nohup python3 "$process_file" > "$log_file" 2>&1 &
+    # Загружаем переменные окружения и запускаем процесс в фоне
+    if [ -f ".env" ]; then
+        export $(grep -v '^#' .env | xargs)
+    fi
+    nohup env $(grep -v '^#' .env | xargs) python3 "$process_file" > "$log_file" 2>&1 &
     local pid=$!
     
     echo "$pid" > "${process_file}.pid"

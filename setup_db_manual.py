@@ -2,46 +2,26 @@ import asyncpg
 import asyncio
 import os
 
-# Настройки подключения
-DB_HOST = "localhost"
-DB_PORT = 5432
-DB_USER = "postgres"
-DB_PASSWORD = "8998"  # Замените на ваш пароль
-DB_NAME = "support_bot"
+# Настройки подключения из переменных окружения
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = int(os.getenv("DB_PORT", "5432"))
+DB_USER = os.getenv("DB_USER", "bot_user")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "8998")
+DB_NAME = os.getenv("DB_NAME", "support_bot")
 
 async def setup_database():
     print("Настройка базы данных...")
     
     try:
-        # Подключаемся к системной базе postgres для создания новой базы
+        # Подключаемся к базе данных (предполагаем что база уже создана)
         print("Подключение к PostgreSQL...")
-        conn = await asyncpg.connect(
-            host=DB_HOST, port=DB_PORT,
-            user=DB_USER, password=DB_PASSWORD,
-            database="postgres"
-        )
-        
-        # Проверяем, существует ли база данных
-        exists = await conn.fetchval(
-            "SELECT 1 FROM pg_database WHERE datname = $1", DB_NAME
-        )
-        
-        if not exists:
-            print(f"Создание базы данных {DB_NAME}...")
-            await conn.execute(f"CREATE DATABASE {DB_NAME}")
-            print("База данных создана!")
-        else:
-            print("База данных уже существует")
-        
-        await conn.close()
-        
-        # Подключаемся к созданной базе данных
-        print("Создание таблиц...")
         conn = await asyncpg.connect(
             host=DB_HOST, port=DB_PORT,
             user=DB_USER, password=DB_PASSWORD,
             database=DB_NAME
         )
+        
+        print("Создание таблиц...")
         
         # Создаем таблицы
         await conn.execute("""
@@ -80,6 +60,16 @@ async def setup_database():
             )
         """)
         
+        # Создаем таблицу рейтингов
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ratings (
+                user_id BIGINT PRIMARY KEY REFERENCES users(user_id),
+                rating INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
         # Добавляем недостающие столбцы в существующие таблицы
         try:
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT FALSE")
@@ -93,6 +83,8 @@ async def setup_database():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_complaints_original_user_id ON complaints(original_user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_complaints_complainer_user_id ON complaints(complainer_user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_blocked ON users(is_blocked)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_ratings_user_id ON ratings(user_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_ratings_rating ON ratings(rating)")
         
         await conn.close()
         print("✅ Таблицы созданы/обновлены успешно!")
