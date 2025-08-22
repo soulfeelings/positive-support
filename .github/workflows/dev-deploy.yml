@@ -19,53 +19,16 @@ jobs:
       with:
         python-version: '3.11'
         
-    - name: Install dependencies
+    - name: Deploy application
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Stop services
-      run: |
-        # Останавливаем сервисы если они запущены
-        pkill -f "python main.py" || true
-        pkill -f "python bot.py" || true
-        sleep 5
-        
-    - name: Database migration check
-      run: |
-        # Проверяем состояние базы данных
-        python check_db.py || echo "Database check completed"
-        
-    - name: Start API service
-      run: |
-        # Запускаем API в фоне
-        nohup python main.py > api.log 2>&1 &
-        sleep 10
-        
-    - name: Health check API
-      run: |
-        # Проверяем что API запустился
-        for i in {1..30}; do
-          if curl -f http://localhost:8000/health; then
-            echo "API is healthy"
-            break
-          fi
-          echo "Waiting for API... ($i/30)"
-          sleep 2
-        done
-        
-    - name: Start Bot service  
-      run: |
-        # Запускаем бота в фоне
-        nohup python bot.py > bot.log 2>&1 &
-        sleep 5
+        # Запускаем полный деплой через наш готовый скрипт
+        chmod +x ./deploy.sh
+        ./deploy.sh
         
     - name: Verify deployment
       run: |
-        # Проверяем что процессы запущены
-        pgrep -f "python main.py" || (echo "API process not found" && exit 1)
-        pgrep -f "python bot.py" || (echo "Bot process not found" && exit 1)
-        echo "✅ All services are running"
+        # Проверяем статус через deploy.sh
+        ./deploy.sh status
         
     - name: Cleanup old logs
       run: |
