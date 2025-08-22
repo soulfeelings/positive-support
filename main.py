@@ -115,7 +115,7 @@ async def get_profile(data: UserProfile):
     try:
         conn = await get_connection()
         user = await conn.fetchrow(
-            "SELECT user_id, nickname FROM users WHERE user_id = $1", 
+            "SELECT user_id, nickname, is_blocked FROM users WHERE user_id = $1", 
             data.user_id
         )
         
@@ -129,6 +129,12 @@ async def get_profile(data: UserProfile):
         except:
             rating = 0
         
+        # Получаем количество жалоб на пользователя
+        complaints_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM complaints WHERE original_user_id = $1", 
+            data.user_id
+        ) or 0
+        
         await conn.close()
         
         if user:
@@ -136,7 +142,9 @@ async def get_profile(data: UserProfile):
                 "status": "ok",
                 "user_id": user["user_id"],
                 "nickname": user["nickname"],
-                "rating": rating
+                "rating": rating,
+                "complaints_count": complaints_count,
+                "is_blocked": user["is_blocked"]
             }
         else:
             return {"status": "not_found"}
@@ -257,6 +265,83 @@ async def delete_help_request(data: dict):
         
     except Exception as e:
         logger.error(f"Error deleting help request: {e}")
+        return {"status": "error"}
+
+@app.post("/submit_complaint")
+async def submit_complaint(data: dict):
+    """Подача жалобы на сообщение"""
+    try:
+        request_id = data.get("request_id")
+        complainer_user_id = data.get("complainer_user_id")
+        
+        conn = await get_connection()
+        
+        # Получаем данные сообщения, на которое жалуются
+        message_data = await conn.fetchrow("""
+            SELECT id, user_id, text, file_id, message_type, created_at
+            FROM messages 
+            WHERE id = $1 AND type = 'request'
+        """, request_id)
+        
+        if not message_data:
+            await conn.close()
+            return {"status": "message_not_found"}
+        
+        # Переносим сообщение в таблицу жалоб
+        await conn.execute("""
+            INSERT INTO complaints (message_id, original_user_id, complainer_user_id, text, file_id, message_type, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+        """, 
+            message_data["id"], 
+            message_data["user_id"], 
+            complainer_user_id,
+            message_data["text"], 
+            message_data["file_id"], 
+            message_data["message_type"], 
+            message_data["created_at"]
+        )
+        
+        # Удаляем оригинальное сообщение из таблицы messages
+        await conn.execute("DELETE FROM messages WHERE id = $1", request_id)
+        
+        # Проверяем количество жалоб на пользователя
+        original_user_id = message_data["user_id"]
+        complaints_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM complaints WHERE original_user_id = $1", 
+            original_user_id
+        ) or 0
+        
+        # Автоматическая блокировка при 5 или более жалобах
+        auto_blocked = False
+        if complaints_count >= 5:
+            # Проверяем, не заблокирован ли уже пользователь
+            is_already_blocked = await conn.fetchval(
+                "SELECT is_blocked FROM users WHERE user_id = $1", 
+                original_user_id
+            )
+            
+            if not is_already_blocked:
+                # Блокируем пользователя
+                await conn.execute(
+                    "UPDATE users SET is_blocked = TRUE WHERE user_id = $1", 
+                    original_user_id
+                )
+                auto_blocked = True
+                logger.warning(f"🚫 AUTO-BLOCKED user {original_user_id} after {complaints_count} complaints")
+        
+        await conn.close()
+        
+        logger.info(f"✅ Complaint submitted: message_id={request_id}, by_user={complainer_user_id}, complaints_total={complaints_count}")
+        
+        result = {"status": "success", "complaints_count": complaints_count}
+        if auto_blocked:
+            result["auto_blocked"] = True
+            result["message"] = f"Пользователь автоматически заблокирован после {complaints_count} жалоб"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error submitting complaint: {e}")
         return {"status": "error"}
 
 @app.post("/increment_rating")
