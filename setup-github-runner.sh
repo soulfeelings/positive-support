@@ -173,3 +173,4 @@ echo ""
 echo -e "${BLUE}🔗 Проверьте runner в настройках репозитория:${NC}"
 echo "  https://github.com/${OWNER}/${REPO}/settings/actions/runners"
 echo ""
+
