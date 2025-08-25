@@ -269,6 +269,7 @@ Type=simple
 User=root
 WorkingDirectory=$PROJECT_DIR
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-$PROJECT_DIR/.env
 ExecStart=/usr/bin/python3 admin_bot.py
 Restart=always
 RestartSec=10
@@ -410,7 +411,15 @@ main() {
                 # Запускаем админ-бота (если файл существует)
                 if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
                     log "Starting Admin Bot..."
-                    start_process "Admin Bot" "admin_bot.py" "${LOG_DIR}/admin_bot.log"
+                    
+                    # Проверяем конфигурацию админ-бота
+                    if python3 check_admin_config.py > /dev/null 2>&1; then
+                        start_process "Admin Bot" "admin_bot.py" "${LOG_DIR}/admin_bot.log"
+                    else
+                        echo -e "${YELLOW}⚠️  Admin Bot configuration incomplete${NC}"
+                        echo -e "${YELLOW}   Run: python3 check_admin_config.py${NC}"
+                        echo -e "${YELLOW}   Or see: ADMIN_BOT_SETUP.md${NC}"
+                    fi
                 fi
                 
                 log "Waiting for services to stabilize..."

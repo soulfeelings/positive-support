@@ -34,11 +34,19 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "8998")
 DB_NAME = os.getenv("DB_NAME", "support_bot")
 
 if not ADMIN_BOT_TOKEN:
-    logger.error("ADMIN_BOT_TOKEN not set!")
+    logger.error("❌ ADMIN_BOT_TOKEN not set in environment variables!")
+    logger.error("Please add ADMIN_BOT_TOKEN to your .env file")
+    exit(1)
+
+if not ADMIN_IDS or ADMIN_IDS == [0]:
+    logger.error("❌ ADMIN_ID not set in environment variables!")
+    logger.error("Please add ADMIN_ID to your .env file")
     exit(1)
 
 logger.info(f"🔧 Admin Bot starting with token: {ADMIN_BOT_TOKEN[:10]}...")
 logger.info(f"👥 Admin IDs: {ADMIN_IDS}")
+logger.info(f"🌐 Backend URL: {BACKEND_URL}")
+logger.info(f"📊 Database: {DB_HOST}:{DB_PORT}/{DB_NAME}")
 
 bot = Bot(token=ADMIN_BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())

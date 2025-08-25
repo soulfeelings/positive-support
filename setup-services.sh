@@ -143,6 +143,7 @@ Group=$USER
 WorkingDirectory=$PROJECT_DIR
 Environment=PATH=/usr/bin:/usr/local/bin
 Environment=PYTHONPATH=$PROJECT_DIR
+EnvironmentFile=-$PROJECT_DIR/.env
 ExecStart=/usr/bin/python3 $PROJECT_DIR/admin_bot.py
 ExecReload=/bin/kill -HUP \$MAINPID
 Restart=on-failure
