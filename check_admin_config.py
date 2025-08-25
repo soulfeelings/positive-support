@@ -31,7 +31,7 @@ def check_config():
         return False
     
     # Проверяем обязательные переменные
-    required_vars = ["ADMIN_BOT_TOKEN", "ADMIN_ID"]
+    required_vars = ["8233417802:AAGyzmvx1m7MdhGFN-Jk3tTjJ7Q_NgV16h8", "8166609254"]
     missing_vars = []
     
     for var in required_vars:
