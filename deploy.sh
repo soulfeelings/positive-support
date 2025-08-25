@@ -448,15 +448,7 @@ main() {
                 # Запускаем админ-бота (если файл существует)
                 if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
                     log "Starting Admin Bot..."
-                    
-                    # Проверяем конфигурацию админ-бота
-                    if python3 check_admin_config.py > /dev/null 2>&1; then
-                        start_process "Admin Bot" "admin_bot.py" "${LOG_DIR}/admin_bot.log"
-                    else
-                        echo -e "${YELLOW}⚠️  Admin Bot configuration incomplete${NC}"
-                        echo -e "${YELLOW}   Run: python3 check_admin_config.py${NC}"
-                        echo -e "${YELLOW}   Or see: ADMIN_BOT_SETUP.md${NC}"
-                    fi
+                    start_process "Admin Bot" "admin_bot.py" "${LOG_DIR}/admin_bot.log"
                 fi
                 
                 log "Waiting for services to stabilize..."

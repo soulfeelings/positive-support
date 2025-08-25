@@ -15,12 +15,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Конфигурация бота
-ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN", "")
+ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN", "8233417802:AAGyzmvx1m7MdhGFN-Jk3tTjJ7Q_NgV16h8")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
-# Список ID администраторов
+# Список ID администраторов (добавьте свой Telegram ID)
 ADMIN_IDS = [
-    int(os.getenv("ADMIN_ID", "0")),  # Основной админ из переменной окружения
+    int(os.getenv("ADMIN_ID", "8166609254")),  # Основной админ из переменной окружения
     # Можно добавить еще администраторов:
     # 123456789,  # ID второго админа
     # 987654321,  # ID третьего админа
@@ -33,17 +33,7 @@ DB_USER = os.getenv("DB_USER", "bot_user")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "8998")
 DB_NAME = os.getenv("DB_NAME", "support_bot")
 
-if not ADMIN_BOT_TOKEN:
-    logger.error("❌ ADMIN_BOT_TOKEN not set in environment variables!")
-    logger.error("Please add ADMIN_BOT_TOKEN to your .env file")
-    exit(1)
-
-if not ADMIN_IDS or ADMIN_IDS == [0]:
-    logger.error("❌ ADMIN_ID not set in environment variables!")
-    logger.error("Please add ADMIN_ID to your .env file")
-    exit(1)
-
-logger.info(f"🔧 Admin Bot starting with token: {ADMIN_BOT_TOKEN[:10]}...")
+logger.info(f"🔧 Admin Bot starting...")
 logger.info(f"👥 Admin IDs: {ADMIN_IDS}")
 logger.info(f"🌐 Backend URL: {BACKEND_URL}")
 logger.info(f"📊 Database: {DB_HOST}:{DB_PORT}/{DB_NAME}")
