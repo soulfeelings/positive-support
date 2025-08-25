@@ -267,9 +267,21 @@ async def handle_unblock(callback: types.CallbackQuery, state: FSMContext):
             await conn.close()
             return
         
-        # Разблокируем пользователя
+        # Получаем количество жалоб ДО удаления
+        complaints_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM complaints WHERE complained_user_id = $1", 
+            user_id_to_unblock
+        ) or 0
+        
+        # Разблокируем пользователя и обнуляем жалобы
         await conn.execute(
             "UPDATE users SET is_blocked = FALSE WHERE user_id = $1", 
+            user_id_to_unblock
+        )
+        
+        # Удаляем все жалобы на этого пользователя
+        await conn.execute(
+            "DELETE FROM complaints WHERE complained_user_id = $1", 
             user_id_to_unblock
         )
         
@@ -281,13 +293,14 @@ async def handle_unblock(callback: types.CallbackQuery, state: FSMContext):
 👤 **Никнейм:** {safe_nickname}
 🆔 **ID:** `{user_id_to_unblock}`
 👨‍💼 **Разблокирован администратором:** {escape_markdown(callback.from_user.first_name or 'Админ')}
+🗑️ **Удалено жалоб:** {complaints_count}
 
-🎉 Пользователь может снова пользоваться ботом"""
+🎉 Пользователь может снова пользоваться ботом с чистой репутацией"""
         
         await callback.message.edit_text(success_text, parse_mode='Markdown')
         await callback.answer("✅ Пользователь разблокирован")
         
-        logger.info(f"Admin {callback.from_user.id} unblocked user {user_id_to_unblock} ({user['nickname']})")
+        logger.info(f"Admin {callback.from_user.id} unblocked user {user_id_to_unblock} ({user['nickname']}) and cleared all complaints")
         
     except Exception as e:
         logger.error(f"Error unblocking user: {e}")
