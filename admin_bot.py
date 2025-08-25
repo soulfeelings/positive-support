@@ -304,7 +304,8 @@ async def handle_unblock(callback: types.CallbackQuery, state: FSMContext):
         
     except Exception as e:
         logger.error(f"Error unblocking user: {e}")
-        await callback.message.edit_text("❌ Ошибка при разблокировке")
+        logger.error(f"Error details: user_id={user_id_to_unblock}, error_type={type(e).__name__}")
+        await callback.message.edit_text(f"❌ Ошибка при разблокировке: {str(e)[:100]}")
         await callback.answer()
     
     await state.clear()
