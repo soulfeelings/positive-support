@@ -89,6 +89,14 @@ stop_process() {
         log "Stopping systemd service: $service_name"
         systemctl stop "$service_name" 2>/dev/null || true
         systemctl disable "$service_name" 2>/dev/null || true
+        
+        # Дополнительная проверка для API - убиваем процессы на порту 8000
+        if [[ "$process_name" == "API" ]]; then
+            log "Killing any remaining processes on port 8000..."
+            lsof -ti:8000 | xargs -r kill -9 2>/dev/null || true
+            sleep 2
+        fi
+        
         log "✅ $process_name stopped via systemd"
         return 0
     fi
@@ -96,10 +104,20 @@ stop_process() {
     # Fallback: прямая остановка процесса
     local pids=$(pgrep -f "$process_file" || true)
     
+    # Для API также проверяем процессы на порту 8000
+    if [[ "$process_name" == "API" ]]; then
+        local port_pids=$(lsof -ti:8000 2>/dev/null || true)
+        if [ -n "$port_pids" ]; then
+            pids="$pids $port_pids"
+        fi
+    fi
+    
     if [ -n "$pids" ]; then
         for pid in $pids; do
-            log "Terminating process $pid ($process_name)"
-            kill -TERM "$pid" 2>/dev/null || true
+            if [ -n "$pid" ] && [ "$pid" != " " ]; then
+                log "Terminating process $pid ($process_name)"
+                kill -TERM "$pid" 2>/dev/null || true
+            fi
         done
         
         # Ждем завершения процессов
@@ -107,10 +125,19 @@ stop_process() {
         
         # Проверяем что процессы действительно завершились
         local remaining_pids=$(pgrep -f "$process_file" || true)
+        if [[ "$process_name" == "API" ]]; then
+            local remaining_port_pids=$(lsof -ti:8000 2>/dev/null || true)
+            if [ -n "$remaining_port_pids" ]; then
+                remaining_pids="$remaining_pids $remaining_port_pids"
+            fi
+        fi
+        
         if [ -n "$remaining_pids" ]; then
             log "Force killing remaining processes..."
             for pid in $remaining_pids; do
-                kill -9 "$pid" 2>/dev/null || true
+                if [ -n "$pid" ] && [ "$pid" != " " ]; then
+                    kill -9 "$pid" 2>/dev/null || true
+                fi
             done
             sleep 2
         fi
@@ -128,6 +155,16 @@ start_process() {
     local log_file="$3"
     
     log "Starting $process_name..."
+    
+    # Дополнительная проверка для API - убеждаемся что порт 8000 свободен
+    if [[ "$process_name" == "API" ]]; then
+        local port_check=$(lsof -ti:8000 2>/dev/null || true)
+        if [ -n "$port_check" ]; then
+            log "Port 8000 is still occupied, killing remaining processes..."
+            lsof -ti:8000 | xargs -r kill -9 2>/dev/null || true
+            sleep 3
+        fi
+    fi
     
     # Проверяем, есть ли systemd сервис
     local service_name=""
