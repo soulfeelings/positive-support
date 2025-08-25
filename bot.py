@@ -518,7 +518,7 @@ async def show_help_request_simple(message: types.Message, state: FSMContext):
             await message.answer(
                 f"🆘 **{safe_request_nickname}** просит помощи:\n\n"
                 f"💭 _{safe_request_text}_\n\n"
-                f"❤️ Хочешь помочь этому человеку?",
+                "❤️ Хочешь помочь этому человеку?",
                 reply_markup=get_help_inline_kb(),
                 parse_mode='Markdown'
             )
