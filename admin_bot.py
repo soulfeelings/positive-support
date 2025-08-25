@@ -325,28 +325,35 @@ async def handle_set_complaints(callback: types.CallbackQuery, state: FSMContext
             await conn.close()
             return
         
-        # Получаем текущее количество жалоб
+        # Получаем текущее количество жалоб (используем правильное поле)
         current_complaints = await conn.fetchval(
-            "SELECT COUNT(*) FROM complaints WHERE complained_user_id = $1", 
+            "SELECT COUNT(*) FROM complaints WHERE original_user_id = $1", 
             user_id
         ) or 0
         
         # Удаляем все текущие жалобы
         await conn.execute(
-            "DELETE FROM complaints WHERE complained_user_id = $1", 
+            "DELETE FROM complaints WHERE original_user_id = $1", 
             user_id
         )
         
         # Создаем новые "фиктивные" жалобы для достижения нужного количества
-        for i in range(new_complaints_count):
-            await conn.execute(
-                """INSERT INTO complaints (complained_user_id, complainer_user_id, message_content, complaint_date)
-                   VALUES ($1, $2, $3, $4)""",
-                user_id,
-                0,  # ID системы
-                f"Административная корректировка #{i+1}",
-                "2024-01-01T00:00:00"
-            )
+        if new_complaints_count > 0:
+            # Получаем текущее время
+            from datetime import datetime
+            current_time = datetime.now()
+            
+            for i in range(new_complaints_count):
+                await conn.execute(
+                    """INSERT INTO complaints (original_user_id, complainer_user_id, text, message_type, created_at, complaint_date)
+                       VALUES ($1, $2, $3, $4, $5, $6)""",
+                    user_id,
+                    1,  # Используем ID 1 вместо 0
+                    f"Административная корректировка #{i+1}",
+                    'text',
+                    current_time,
+                    current_time
+                )
         
         # Обновляем статус блокировки в зависимости от количества жалоб
         should_be_blocked = new_complaints_count >= 5
@@ -379,7 +386,8 @@ async def handle_set_complaints(callback: types.CallbackQuery, state: FSMContext
         
     except Exception as e:
         logger.error(f"Error setting complaints: {e}")
-        await callback.message.edit_text("❌ Ошибка при изменении жалоб")
+        logger.error(f"Error details: user_id={user_id}, new_count={new_complaints_count}")
+        await callback.message.edit_text(f"❌ Ошибка при изменении жалоб: {str(e)[:100]}")
         await callback.answer()
     
     await state.clear()
@@ -414,10 +422,10 @@ async def stats_command(message: types.Message):
         
         # Топ пользователей по жалобам
         top_complained = await conn.fetch("""
-            SELECT c.complained_user_id, u.nickname, u.is_blocked, COUNT(*) as complaint_count
+            SELECT c.original_user_id, u.nickname, u.is_blocked, COUNT(*) as complaint_count
             FROM complaints c
-            LEFT JOIN users u ON c.complained_user_id = u.user_id
-            GROUP BY c.complained_user_id, u.nickname, u.is_blocked
+            LEFT JOIN users u ON c.original_user_id = u.user_id
+            GROUP BY c.original_user_id, u.nickname, u.is_blocked
             ORDER BY complaint_count DESC
             LIMIT 10
         """)
@@ -434,7 +442,7 @@ async def stats_command(message: types.Message):
 🚨 **Топ по жалобам:**"""
         
         for i, user in enumerate(top_complained, 1):
-            nickname = user['nickname'] or f"ID:{user['complained_user_id']}"
+            nickname = user['nickname'] or f"ID:{user['original_user_id']}"
             safe_nickname = escape_markdown(nickname)
             status = "🚫" if user['is_blocked'] else "✅"
             complaint_count = user['complaint_count']
@@ -449,9 +457,9 @@ async def stats_command(message: types.Message):
             keyboard = InlineKeyboardMarkup(inline_keyboard=[])
             
             for i, user in enumerate(top_complained[:5], 1):  # Показываем только первые 5 для кнопок
-                nickname = user['nickname'] or f"ID:{user['complained_user_id']}"
+                nickname = user['nickname'] or f"ID:{user['original_user_id']}"
                 safe_nickname = escape_markdown(nickname)[:20]  # Ограничиваем длину для кнопки
-                user_id = user['complained_user_id']
+                user_id = user['original_user_id']
                 complaint_count = user['complaint_count']
                 
                 button_text = f"{i}. {safe_nickname} ({complaint_count})"
