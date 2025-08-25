@@ -44,6 +44,10 @@ class SetNickname(BaseModel):
 class UserProfile(BaseModel):
     user_id: int
 
+class HelpRequestQuery(BaseModel):
+    user_id: int
+    last_seen_id: Optional[int] = 0
+
 class Message(BaseModel):
     user_id: int
     text: Optional[str] = None
@@ -213,20 +217,37 @@ async def get_support(data: UserProfile):
         return {"status": "error"}
 
 @app.post("/get_help_request")
-async def get_help_request(data: UserProfile):
-    """Получение случайного запроса помощи"""
+async def get_help_request(data: HelpRequestQuery):
+    """Получение запроса помощи по порядку (FIFO)"""
     try:
         conn = await get_connection()
+        
+        # Сначала пытаемся найти сообщение с id > last_seen_id
         request = await conn.fetchrow("""
             SELECT m.id, m.text, m.file_id, m.message_type, u.nickname, m.user_id 
             FROM messages m
             JOIN users u ON m.user_id = u.user_id
-            WHERE m.type = 'request' AND m.user_id != $1
-            ORDER BY RANDOM() LIMIT 1
-        """, data.user_id)
+            WHERE m.type = 'request' AND m.user_id != $1 AND m.id > $2
+            ORDER BY m.id ASC LIMIT 1
+        """, data.user_id, data.last_seen_id)
+        
+        # Если не найдено сообщение с id > last_seen_id, начинаем сначала
+        if not request:
+            request = await conn.fetchrow("""
+                SELECT m.id, m.text, m.file_id, m.message_type, u.nickname, m.user_id 
+                FROM messages m
+                JOIN users u ON m.user_id = u.user_id
+                WHERE m.type = 'request' AND m.user_id != $1
+                ORDER BY m.id ASC LIMIT 1
+            """, data.user_id)
+            
+            if request:
+                logger.info(f"No more messages after id {data.last_seen_id}, starting from beginning for user {data.user_id}")
+        
         await conn.close()
         
         if request:
+            logger.info(f"Showing help request id={request['id']} to user {data.user_id}, last_seen_id was {data.last_seen_id}")
             return {
                 "status": "ok",
                 "request": {
