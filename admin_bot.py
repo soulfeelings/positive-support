@@ -343,12 +343,35 @@ async def handle_set_complaints(callback: types.CallbackQuery, state: FSMContext
             from datetime import datetime
             current_time = datetime.now()
             
+            # Создаем или используем системного пользователя для административных записей
+            system_user_id = 0
+            
+            # Проверяем существует ли системный пользователь
+            system_exists = await conn.fetchval(
+                "SELECT user_id FROM users WHERE user_id = $1", 
+                system_user_id
+            )
+            
+            if not system_exists:
+                # Создаем системного пользователя
+                await conn.execute(
+                    """INSERT INTO users (user_id, nickname, is_blocked, created_at)
+                       VALUES ($1, $2, $3, $4) 
+                       ON CONFLICT (user_id) DO NOTHING""",
+                    system_user_id,
+                    "Система",
+                    False,
+                    current_time
+                )
+            
+            complainer_id = system_user_id
+            
             for i in range(new_complaints_count):
                 await conn.execute(
                     """INSERT INTO complaints (original_user_id, complainer_user_id, text, message_type, created_at, complaint_date)
                        VALUES ($1, $2, $3, $4, $5, $6)""",
                     user_id,
-                    1,  # Используем ID 1 вместо 0
+                    complainer_id,
                     f"Административная корректировка #{i+1}",
                     'text',
                     current_time,
@@ -367,15 +390,24 @@ async def handle_set_complaints(callback: types.CallbackQuery, state: FSMContext
         safe_nickname = escape_markdown(user['nickname'])
         block_status = "🚫 Заблокирован" if should_be_blocked else "✅ Разблокирован"
         
+        # Определяем тип изменения
+        if new_complaints_count == 0:
+            action_description = "🧹 Полная амнистия - все жалобы обнулены"
+        elif new_complaints_count < current_complaints:
+            action_description = f"📉 Жалоб стало меньше (было {current_complaints} → стало {new_complaints_count})"
+        elif new_complaints_count > current_complaints:
+            action_description = f"📈 Жалоб стало больше (было {current_complaints} → стало {new_complaints_count})"
+        else:
+            action_description = f"📊 Количество жалоб осталось прежним ({new_complaints_count})"
+
         success_text = f"""📊 **Количество жалоб изменено**
 
 👤 **Пользователь:** {safe_nickname}
 🆔 **ID:** `{user_id}`
 👨‍💼 **Изменил:** {escape_markdown(callback.from_user.first_name or 'Админ')}
 
-📈 **Было жалоб:** {current_complaints}
-📊 **Стало жалоб:** {new_complaints_count}
-🔄 **Статус:** {block_status}
+{action_description}
+🔄 **Новый статус:** {block_status}
 
 {'⚠️ Пользователь автоматически заблокирован за 5+ жалоб' if should_be_blocked else '✅ Пользователь может пользоваться ботом'}"""
         
