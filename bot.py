@@ -13,12 +13,15 @@ from aiogram.fsm.storage.memory import MemoryStorage
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = "8234250977:AAFSjY7Ci-xajOeB-JqRgWB2vTVtQaW9UCc"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8234250977:AAFSjY7Ci-xajOeB-JqRgWB2vTVtQaW9UCc")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 if not BOT_TOKEN:
     logger.error("BOT_TOKEN not set!")
     exit(1)
+
+logger.info(f"🤖 Bot starting with token: {BOT_TOKEN[:10]}...")
+logger.info(f"🌐 Backend URL: {BACKEND_URL}")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -425,23 +428,37 @@ async def get_support(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "🤝 Помочь кому-нибудь")
 async def help_someone(message: types.Message, state: FSMContext):
-    """Показать случайный запрос помощи"""
+    """Показать запрос помощи (начинаем сначала)"""
     if await check_user_blocked(message.from_user.id):
         await send_blocked_message(message)
         return
     
     await state.clear()
+    # Сбрасываем last_seen_id для начала с самого первого сообщения
+    await state.update_data(last_seen_help_id=0)
     await show_help_request_simple(message, state)
 
 async def show_help_request_simple(message: types.Message, state: FSMContext):
-    """Показать запрос помощи (упрощенная функция)"""
-    result = await api_request("get_help_request", {"user_id": message.from_user.id})
+    """Показать запрос помощи по порядку (FIFO)"""
+    # Получаем последний просмотренный message_id из состояния
+    data = await state.get_data()
+    last_seen_id = data.get("last_seen_help_id", 0)
+    
+    logger.info(f"Requesting help request for user {message.from_user.id} with last_seen_id={last_seen_id}")
+    result = await api_request("get_help_request", {
+        "user_id": message.from_user.id,
+        "last_seen_id": last_seen_id
+    })
     
     if result.get("status") == "ok":
         request_data = result["request"]
         
-        # Сохраняем данные запроса в состоянии
-        await state.update_data(current_request=request_data)
+        # Сохраняем данные запроса и обновляем last_seen_id в состоянии
+        logger.info(f"Showing help request id={request_data['id']} to user {message.from_user.id}, updating last_seen_help_id")
+        await state.update_data(
+            current_request=request_data,
+            last_seen_help_id=request_data["id"]
+        )
         await state.set_state(UserStates.viewing_help_request)
         
         # Формируем сообщение в зависимости от типа

@@ -261,3 +261,4 @@ echo "1. Проверьте конфигурацию в main.py и bot.py"
 echo "2. Убедитесь что PostgreSQL запущен и доступен"
 echo "3. Запустите сервисы: ./manage-services.sh start"
 echo "4. Проверьте статус: ./manage-services.sh status"
+
