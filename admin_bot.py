@@ -269,7 +269,7 @@ async def handle_unblock(callback: types.CallbackQuery, state: FSMContext):
         
         # Получаем количество жалоб ДО удаления
         complaints_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM complaints WHERE complained_user_id = $1", 
+            "SELECT COUNT(*) FROM complaints WHERE original_user_id = $1", 
             user_id_to_unblock
         ) or 0
         
@@ -281,7 +281,7 @@ async def handle_unblock(callback: types.CallbackQuery, state: FSMContext):
         
         # Удаляем все жалобы на этого пользователя
         await conn.execute(
-            "DELETE FROM complaints WHERE complained_user_id = $1", 
+            "DELETE FROM complaints WHERE original_user_id = $1", 
             user_id_to_unblock
         )
         
@@ -384,10 +384,10 @@ async def stats_command(message: types.Message):
         
         # Топ пользователей по жалобам
         top_complained = await conn.fetch("""
-            SELECT c.complained_user_id, u.nickname, u.is_blocked, COUNT(*) as complaint_count
+            SELECT c.original_user_id, u.nickname, u.is_blocked, COUNT(*) as complaint_count
             FROM complaints c
-            LEFT JOIN users u ON c.complained_user_id = u.user_id
-            GROUP BY c.complained_user_id, u.nickname, u.is_blocked
+            LEFT JOIN users u ON c.original_user_id = u.user_id
+            GROUP BY c.original_user_id, u.nickname, u.is_blocked
             ORDER BY complaint_count DESC
             LIMIT 10
         """)
@@ -404,7 +404,7 @@ async def stats_command(message: types.Message):
 🚨 **Топ по жалобам:**"""
         
         for i, user in enumerate(top_complained, 1):
-            nickname = user['nickname'] or f"ID:{user['complained_user_id']}"
+            nickname = user['nickname'] or f"ID:{user['original_user_id']}"
             safe_nickname = escape_markdown(nickname)
             status = "🚫" if user['is_blocked'] else "✅"
             complaint_count = user['complaint_count']
