@@ -36,8 +36,30 @@ check_process() {
     local process_name="$1"
     local process_file="$2"
     
+    # Проверяем, есть ли systemd сервис
+    local service_name=""
+    if [[ "$process_name" == "API" ]]; then
+        service_name="positive-support-api.service"
+    elif [[ "$process_name" == "Bot" ]]; then
+        service_name="positive-support-bot.service"
+    elif [[ "$process_name" == "Admin Bot" ]]; then
+        service_name="positive-support-admin-bot.service"
+    fi
+    
+    if [ -n "$service_name" ] && systemctl list-unit-files | grep -q "$service_name"; then
+        # Проверяем systemd сервис
+        if systemctl is-active --quiet "$service_name"; then
+            echo -e "${GREEN}✅ $process_name is running (systemd)${NC}"
+            return 0
+        else
+            echo -e "${RED}❌ $process_name is not running (systemd)${NC}"
+            return 1
+        fi
+    fi
+    
+    # Fallback: проверка прямых процессов
     if pgrep -f "$process_file" > /dev/null; then
-        echo -e "${GREEN}✅ $process_name is running${NC}"
+        echo -e "${GREEN}✅ $process_name is running (direct)${NC}"
         return 0
     else
         echo -e "${RED}❌ $process_name is not running${NC}"
@@ -52,13 +74,50 @@ stop_process() {
     
     log "Stopping $process_name..."
     
-    # Находим PID процесса
+    # Проверяем, есть ли systemd сервис
+    local service_name=""
+    if [[ "$process_name" == "API" ]]; then
+        service_name="positive-support-api.service"
+    elif [[ "$process_name" == "Bot" ]]; then
+        service_name="positive-support-bot.service"
+    elif [[ "$process_name" == "Admin Bot" ]]; then
+        service_name="positive-support-admin-bot.service"
+    fi
+    
+    if [ -n "$service_name" ] && systemctl list-unit-files | grep -q "$service_name"; then
+        # Останавливаем systemd сервис
+        log "Stopping systemd service: $service_name"
+        systemctl stop "$service_name" 2>/dev/null || true
+        systemctl disable "$service_name" 2>/dev/null || true
+        
+        # Дополнительная проверка для API - убиваем процессы на порту 8000
+        if [[ "$process_name" == "API" ]]; then
+            log "Killing any remaining processes on port 8000..."
+            lsof -ti:8000 | xargs -r kill -9 2>/dev/null || true
+            sleep 2
+        fi
+        
+        log "✅ $process_name stopped via systemd"
+        return 0
+    fi
+    
+    # Fallback: прямая остановка процесса
     local pids=$(pgrep -f "$process_file" || true)
+    
+    # Для API также проверяем процессы на порту 8000
+    if [[ "$process_name" == "API" ]]; then
+        local port_pids=$(lsof -ti:8000 2>/dev/null || true)
+        if [ -n "$port_pids" ]; then
+            pids="$pids $port_pids"
+        fi
+    fi
     
     if [ -n "$pids" ]; then
         for pid in $pids; do
-            log "Terminating process $pid ($process_name)"
-            kill -TERM "$pid" 2>/dev/null || true
+            if [ -n "$pid" ] && [ "$pid" != " " ]; then
+                log "Terminating process $pid ($process_name)"
+                kill -TERM "$pid" 2>/dev/null || true
+            fi
         done
         
         # Ждем завершения процессов
@@ -66,10 +125,19 @@ stop_process() {
         
         # Проверяем что процессы действительно завершились
         local remaining_pids=$(pgrep -f "$process_file" || true)
+        if [[ "$process_name" == "API" ]]; then
+            local remaining_port_pids=$(lsof -ti:8000 2>/dev/null || true)
+            if [ -n "$remaining_port_pids" ]; then
+                remaining_pids="$remaining_pids $remaining_port_pids"
+            fi
+        fi
+        
         if [ -n "$remaining_pids" ]; then
             log "Force killing remaining processes..."
             for pid in $remaining_pids; do
-                kill -9 "$pid" 2>/dev/null || true
+                if [ -n "$pid" ] && [ "$pid" != " " ]; then
+                    kill -9 "$pid" 2>/dev/null || true
+                fi
             done
             sleep 2
         fi
@@ -88,7 +156,46 @@ start_process() {
     
     log "Starting $process_name..."
     
-    # Загружаем переменные окружения и запускаем процесс в фоне
+    # Дополнительная проверка для API - убеждаемся что порт 8000 свободен
+    if [[ "$process_name" == "API" ]]; then
+        local port_check=$(lsof -ti:8000 2>/dev/null || true)
+        if [ -n "$port_check" ]; then
+            log "Port 8000 is still occupied, killing remaining processes..."
+            lsof -ti:8000 | xargs -r kill -9 2>/dev/null || true
+            sleep 3
+        fi
+    fi
+    
+    # Проверяем, есть ли systemd сервис
+    local service_name=""
+    if [[ "$process_name" == "API" ]]; then
+        service_name="positive-support-api.service"
+    elif [[ "$process_name" == "Bot" ]]; then
+        service_name="positive-support-bot.service"
+    elif [[ "$process_name" == "Admin Bot" ]]; then
+        service_name="positive-support-admin-bot.service"
+    fi
+    
+    if [ -n "$service_name" ] && systemctl list-unit-files | grep -q "$service_name"; then
+        # Используем systemd сервис
+        log "Using systemd service: $service_name"
+        systemctl start "$service_name"
+        systemctl enable "$service_name"
+        
+        # Ждем запуска сервиса
+        sleep 3
+        
+        # Проверяем статус
+        if systemctl is-active --quiet "$service_name"; then
+            log "$process_name started via systemd service"
+            return 0
+        else
+            log "Failed to start $service_name, falling back to direct process"
+        fi
+    fi
+    
+    # Fallback: прямой запуск процесса (для случаев когда systemd недоступен)
+    log "Starting $process_name directly..."
     if [ -f ".env" ]; then
         export $(grep -v '^#' .env | xargs)
     fi
@@ -130,6 +237,101 @@ check_api_health() {
     
     echo -e "${RED}❌ API health check failed${NC}"
     return 1
+}
+
+# Функция для создания systemd сервисов
+setup_systemd_services() {
+    log "Setting up systemd services..."
+    
+    # Проверяем права root
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${RED}❌ This command requires root privileges (sudo)${NC}"
+        exit 1
+    fi
+    
+    # Создаем сервис для API
+    cat > /etc/systemd/system/positive-support-api.service << EOF
+[Unit]
+Description=Positive Support API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$PROJECT_DIR
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Создаем сервис для Bot
+    cat > /etc/systemd/system/positive-support-bot.service << EOF
+[Unit]
+Description=Positive Support Bot
+After=network.target positive-support-api.service
+Wants=positive-support-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$PROJECT_DIR
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Создаем сервис для админ-бота (если файл существует)
+    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+        cat > /etc/systemd/system/positive-support-admin-bot.service << EOF
+[Unit]
+Description=Positive Support Admin Bot
+After=network.target positive-support-api.service
+Wants=positive-support-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$PROJECT_DIR
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-$PROJECT_DIR/.env
+ExecStart=/usr/bin/python3 admin_bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        log "Admin bot service created"
+    fi
+
+    # Перезагружаем systemd и включаем сервисы
+    systemctl daemon-reload
+    systemctl enable positive-support-api.service
+    systemctl enable positive-support-bot.service
+    
+    # Включаем админ-бот если он существует
+    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+        systemctl enable positive-support-admin-bot.service
+        log "Admin bot service enabled"
+    fi
+    
+    log "✅ Systemd services created and enabled"
+    log "Use 'systemctl start positive-support-api' and 'systemctl start positive-support-bot' to start services"
 }
 
 # Функция для создания бэкапа
@@ -226,6 +428,9 @@ main() {
     
     # Останавливаем сервисы
     stop_process "Bot" "bot.py"
+    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+        stop_process "Admin Bot" "admin_bot.py"
+    fi
     stop_process "API" "main.py"
     
     # Устанавливаем зависимости
@@ -240,21 +445,49 @@ main() {
         if check_api_health; then
             # Запускаем бота
             if start_process "Bot" "bot.py" "${LOG_DIR}/bot.log"; then
+                # Запускаем админ-бота (если файл существует)
+                if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+                    log "Starting Admin Bot..."
+                    
+                    # Проверяем конфигурацию админ-бота
+                    if python3 check_admin_config.py > /dev/null 2>&1; then
+                        start_process "Admin Bot" "admin_bot.py" "${LOG_DIR}/admin_bot.log"
+                    else
+                        echo -e "${YELLOW}⚠️  Admin Bot configuration incomplete${NC}"
+                        echo -e "${YELLOW}   Run: python3 check_admin_config.py${NC}"
+                        echo -e "${YELLOW}   Or see: ADMIN_BOT_SETUP.md${NC}"
+                    fi
+                fi
+                
                 log "Waiting for services to stabilize..."
                 sleep 10
                 
                 # Финальная проверка
-                if check_process "API" "main.py" && check_process "Bot" "bot.py"; then
+                local all_services_ok=true
+                if ! check_process "API" "main.py"; then
+                    all_services_ok=false
+                fi
+                if ! check_process "Bot" "bot.py"; then
+                    all_services_ok=false
+                fi
+                
+                if [ "$all_services_ok" = true ]; then
                     echo ""
                     echo -e "${GREEN}🎉 Deployment completed successfully!${NC}"
                     echo ""
                     echo -e "${YELLOW}📋 Service status:${NC}"
                     check_process "API" "main.py"
                     check_process "Bot" "bot.py"
+                    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+                        check_process "Admin Bot" "admin_bot.py"
+                    fi
                     echo ""
                     echo -e "${BLUE}📊 Useful commands:${NC}"
                     echo "  Check API logs:    tail -f ${LOG_DIR}/api.log"
                     echo "  Check Bot logs:    tail -f ${LOG_DIR}/bot.log"
+                    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+                        echo "  Check Admin logs:  tail -f ${LOG_DIR}/admin_bot.log"
+                    fi
                     echo "  API health:        curl ${API_HEALTH_URL}"
                     echo "  Stop services:     ./deploy.sh stop"
                     echo ""
@@ -283,6 +516,9 @@ main() {
 stop_all() {
     log "Stopping all services..."
     stop_process "Bot" "bot.py"
+    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+        stop_process "Admin Bot" "admin_bot.py"
+    fi
     stop_process "API" "main.py"
     echo -e "${GREEN}✅ All services stopped${NC}"
 }
@@ -293,6 +529,23 @@ show_status() {
     echo "=================="
     check_process "API" "main.py"
     check_process "Bot" "bot.py"
+    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+        check_process "Admin Bot" "admin_bot.py"
+    fi
+    
+    # Показываем статус systemd сервисов если они есть
+    if systemctl list-unit-files | grep -q "positive-support-api.service"; then
+        echo ""
+        echo -e "${YELLOW}🔧 Systemd Services Status:${NC}"
+        systemctl status positive-support-api.service --no-pager -l | head -10
+        echo ""
+        systemctl status positive-support-bot.service --no-pager -l | head -10
+        
+        if systemctl list-unit-files | grep -q "positive-support-admin-bot.service"; then
+            echo ""
+            systemctl status positive-support-admin-bot.service --no-pager -l | head -10
+        fi
+    fi
     
     if [ -f "${LOG_DIR}/api.log" ]; then
         echo ""
@@ -304,6 +557,12 @@ show_status() {
         echo ""
         echo -e "${YELLOW}📄 Recent Bot logs:${NC}"
         tail -5 "${LOG_DIR}/bot.log"
+    fi
+    
+    if [ -f "${LOG_DIR}/admin_bot.log" ]; then
+        echo ""
+        echo -e "${YELLOW}📄 Recent Admin Bot logs:${NC}"
+        tail -5 "${LOG_DIR}/admin_bot.log"
     fi
 }
 
@@ -323,6 +582,9 @@ case "${1:-deploy}" in
         sleep 3
         main
         ;;
+    "setup-systemd")
+        setup_systemd_services
+        ;;
     "help"|"-h"|"--help")
         echo "Usage: $0 [command]"
         echo ""
@@ -331,6 +593,7 @@ case "${1:-deploy}" in
         echo "  stop       - Stop all services"
         echo "  status     - Show service status"
         echo "  restart    - Restart all services"
+        echo "  setup-systemd - Create systemd services"
         echo "  help       - Show this help"
         echo ""
         echo "Environment: ${ENVIRONMENT}"

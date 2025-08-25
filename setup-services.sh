@@ -46,6 +46,13 @@ if [ ! -f "$PROJECT_DIR/bot.py" ]; then
     exit 1
 fi
 
+# Проверяем наличие админ-бота (опционально)
+ADMIN_BOT_EXISTS=false
+if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+    ADMIN_BOT_EXISTS=true
+    echo -e "${BLUE}ℹ️  Найден admin_bot.py - будет создан сервис для админ-бота${NC}"
+fi
+
 # Создаем сервис для API
 echo -e "${BLUE}🔧 Создание сервиса positive-support-api...${NC}"
 cat > /etc/systemd/system/positive-support-api.service << EOF
@@ -120,6 +127,46 @@ ReadWritePaths=$PROJECT_DIR
 WantedBy=multi-user.target
 EOF
 
+# Создаем сервис для админ-бота (если он существует)
+if [ "$ADMIN_BOT_EXISTS" = true ]; then
+    echo -e "${BLUE}🔧 Создание сервиса positive-support-admin-bot...${NC}"
+    cat > /etc/systemd/system/positive-support-admin-bot.service << EOF
+[Unit]
+Description=Positive Support Admin Bot
+After=network.target positive-support-api.service
+Wants=positive-support-api.service
+
+[Service]
+Type=simple
+User=$USER
+Group=$USER
+WorkingDirectory=$PROJECT_DIR
+Environment=PATH=/usr/bin:/usr/local/bin
+Environment=PYTHONPATH=$PROJECT_DIR
+EnvironmentFile=-$PROJECT_DIR/.env
+ExecStart=/usr/bin/python3 $PROJECT_DIR/admin_bot.py
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=5
+
+# Логирование
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=positive-support-admin-bot
+
+# Безопасность
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=$PROJECT_DIR
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
 # Перезагружаем systemd
 echo -e "${BLUE}🔄 Перезагрузка systemd...${NC}"
 systemctl daemon-reload
@@ -128,6 +175,11 @@ systemctl daemon-reload
 echo -e "${BLUE}✅ Включение сервисов...${NC}"
 systemctl enable positive-support-api.service
 systemctl enable positive-support-bot.service
+
+if [ "$ADMIN_BOT_EXISTS" = true ]; then
+    systemctl enable positive-support-admin-bot.service
+    echo -e "${GREEN}✅ Админ-бот сервис включен!${NC}"
+fi
 
 echo -e "${GREEN}✅ Сервисы созданы и включены!${NC}"
 
@@ -148,6 +200,16 @@ echo "  systemctl restart positive-support-bot   # Перезапуск"
 echo "  systemctl status positive-support-bot    # Статус"
 echo "  journalctl -u positive-support-bot -f    # Логи"
 echo ""
+
+if [ "$ADMIN_BOT_EXISTS" = true ]; then
+echo "Управление админ-ботом:"
+echo "  systemctl start positive-support-admin-bot     # Запуск"
+echo "  systemctl stop positive-support-admin-bot      # Остановка"
+echo "  systemctl restart positive-support-admin-bot   # Перезапуск"
+echo "  systemctl status positive-support-admin-bot    # Статус"
+echo "  journalctl -u positive-support-admin-bot -f    # Логи"
+echo ""
+fi
 echo "Управление обоими сервисами:"
 echo "  ./manage-services.sh start    # Запуск всех"
 echo "  ./manage-services.sh stop     # Остановка всех"
