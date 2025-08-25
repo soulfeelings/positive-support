@@ -42,6 +42,8 @@ check_process() {
         service_name="positive-support-api.service"
     elif [[ "$process_name" == "Bot" ]]; then
         service_name="positive-support-bot.service"
+    elif [[ "$process_name" == "Admin Bot" ]]; then
+        service_name="positive-support-admin-bot.service"
     fi
     
     if [ -n "$service_name" ] && systemctl list-unit-files | grep -q "$service_name"; then
@@ -78,6 +80,8 @@ stop_process() {
         service_name="positive-support-api.service"
     elif [[ "$process_name" == "Bot" ]]; then
         service_name="positive-support-bot.service"
+    elif [[ "$process_name" == "Admin Bot" ]]; then
+        service_name="positive-support-admin-bot.service"
     fi
     
     if [ -n "$service_name" ] && systemctl list-unit-files | grep -q "$service_name"; then
@@ -131,6 +135,8 @@ start_process() {
         service_name="positive-support-api.service"
     elif [[ "$process_name" == "Bot" ]]; then
         service_name="positive-support-bot.service"
+    elif [[ "$process_name" == "Admin Bot" ]]; then
+        service_name="positive-support-admin-bot.service"
     fi
     
     if [ -n "$service_name" ] && systemctl list-unit-files | grep -q "$service_name"; then
@@ -250,10 +256,41 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+    # Создаем сервис для админ-бота (если файл существует)
+    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+        cat > /etc/systemd/system/positive-support-admin-bot.service << EOF
+[Unit]
+Description=Positive Support Admin Bot
+After=network.target positive-support-api.service
+Wants=positive-support-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$PROJECT_DIR
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 admin_bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        log "Admin bot service created"
+    fi
+
     # Перезагружаем systemd и включаем сервисы
     systemctl daemon-reload
     systemctl enable positive-support-api.service
     systemctl enable positive-support-bot.service
+    
+    # Включаем админ-бот если он существует
+    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+        systemctl enable positive-support-admin-bot.service
+        log "Admin bot service enabled"
+    fi
     
     log "✅ Systemd services created and enabled"
     log "Use 'systemctl start positive-support-api' and 'systemctl start positive-support-bot' to start services"
@@ -353,6 +390,9 @@ main() {
     
     # Останавливаем сервисы
     stop_process "Bot" "bot.py"
+    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+        stop_process "Admin Bot" "admin_bot.py"
+    fi
     stop_process "API" "main.py"
     
     # Устанавливаем зависимости
@@ -367,21 +407,41 @@ main() {
         if check_api_health; then
             # Запускаем бота
             if start_process "Bot" "bot.py" "${LOG_DIR}/bot.log"; then
+                # Запускаем админ-бота (если файл существует)
+                if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+                    log "Starting Admin Bot..."
+                    start_process "Admin Bot" "admin_bot.py" "${LOG_DIR}/admin_bot.log"
+                fi
+                
                 log "Waiting for services to stabilize..."
                 sleep 10
                 
                 # Финальная проверка
-                if check_process "API" "main.py" && check_process "Bot" "bot.py"; then
+                local all_services_ok=true
+                if ! check_process "API" "main.py"; then
+                    all_services_ok=false
+                fi
+                if ! check_process "Bot" "bot.py"; then
+                    all_services_ok=false
+                fi
+                
+                if [ "$all_services_ok" = true ]; then
                     echo ""
                     echo -e "${GREEN}🎉 Deployment completed successfully!${NC}"
                     echo ""
                     echo -e "${YELLOW}📋 Service status:${NC}"
                     check_process "API" "main.py"
                     check_process "Bot" "bot.py"
+                    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+                        check_process "Admin Bot" "admin_bot.py"
+                    fi
                     echo ""
                     echo -e "${BLUE}📊 Useful commands:${NC}"
                     echo "  Check API logs:    tail -f ${LOG_DIR}/api.log"
                     echo "  Check Bot logs:    tail -f ${LOG_DIR}/bot.log"
+                    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+                        echo "  Check Admin logs:  tail -f ${LOG_DIR}/admin_bot.log"
+                    fi
                     echo "  API health:        curl ${API_HEALTH_URL}"
                     echo "  Stop services:     ./deploy.sh stop"
                     echo ""
@@ -410,6 +470,9 @@ main() {
 stop_all() {
     log "Stopping all services..."
     stop_process "Bot" "bot.py"
+    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+        stop_process "Admin Bot" "admin_bot.py"
+    fi
     stop_process "API" "main.py"
     echo -e "${GREEN}✅ All services stopped${NC}"
 }
@@ -420,6 +483,9 @@ show_status() {
     echo "=================="
     check_process "API" "main.py"
     check_process "Bot" "bot.py"
+    if [ -f "$PROJECT_DIR/admin_bot.py" ]; then
+        check_process "Admin Bot" "admin_bot.py"
+    fi
     
     # Показываем статус systemd сервисов если они есть
     if systemctl list-unit-files | grep -q "positive-support-api.service"; then
@@ -428,6 +494,11 @@ show_status() {
         systemctl status positive-support-api.service --no-pager -l | head -10
         echo ""
         systemctl status positive-support-bot.service --no-pager -l | head -10
+        
+        if systemctl list-unit-files | grep -q "positive-support-admin-bot.service"; then
+            echo ""
+            systemctl status positive-support-admin-bot.service --no-pager -l | head -10
+        fi
     fi
     
     if [ -f "${LOG_DIR}/api.log" ]; then
@@ -440,6 +511,12 @@ show_status() {
         echo ""
         echo -e "${YELLOW}📄 Recent Bot logs:${NC}"
         tail -5 "${LOG_DIR}/bot.log"
+    fi
+    
+    if [ -f "${LOG_DIR}/admin_bot.log" ]; then
+        echo ""
+        echo -e "${YELLOW}📄 Recent Admin Bot logs:${NC}"
+        tail -5 "${LOG_DIR}/admin_bot.log"
     fi
 }
 
