@@ -36,8 +36,28 @@ check_process() {
     local process_name="$1"
     local process_file="$2"
     
+    # Проверяем, есть ли systemd сервис
+    local service_name=""
+    if [[ "$process_name" == "API" ]]; then
+        service_name="positive-support-api.service"
+    elif [[ "$process_name" == "Bot" ]]; then
+        service_name="positive-support-bot.service"
+    fi
+    
+    if [ -n "$service_name" ] && systemctl list-unit-files | grep -q "$service_name"; then
+        # Проверяем systemd сервис
+        if systemctl is-active --quiet "$service_name"; then
+            echo -e "${GREEN}✅ $process_name is running (systemd)${NC}"
+            return 0
+        else
+            echo -e "${RED}❌ $process_name is not running (systemd)${NC}"
+            return 1
+        fi
+    fi
+    
+    # Fallback: проверка прямых процессов
     if pgrep -f "$process_file" > /dev/null; then
-        echo -e "${GREEN}✅ $process_name is running${NC}"
+        echo -e "${GREEN}✅ $process_name is running (direct)${NC}"
         return 0
     else
         echo -e "${RED}❌ $process_name is not running${NC}"
@@ -52,7 +72,24 @@ stop_process() {
     
     log "Stopping $process_name..."
     
-    # Находим PID процесса
+    # Проверяем, есть ли systemd сервис
+    local service_name=""
+    if [[ "$process_name" == "API" ]]; then
+        service_name="positive-support-api.service"
+    elif [[ "$process_name" == "Bot" ]]; then
+        service_name="positive-support-bot.service"
+    fi
+    
+    if [ -n "$service_name" ] && systemctl list-unit-files | grep -q "$service_name"; then
+        # Останавливаем systemd сервис
+        log "Stopping systemd service: $service_name"
+        systemctl stop "$service_name" 2>/dev/null || true
+        systemctl disable "$service_name" 2>/dev/null || true
+        log "✅ $process_name stopped via systemd"
+        return 0
+    fi
+    
+    # Fallback: прямая остановка процесса
     local pids=$(pgrep -f "$process_file" || true)
     
     if [ -n "$pids" ]; then
@@ -88,7 +125,34 @@ start_process() {
     
     log "Starting $process_name..."
     
-    # Загружаем переменные окружения и запускаем процесс в фоне
+    # Проверяем, есть ли systemd сервис
+    local service_name=""
+    if [[ "$process_name" == "API" ]]; then
+        service_name="positive-support-api.service"
+    elif [[ "$process_name" == "Bot" ]]; then
+        service_name="positive-support-bot.service"
+    fi
+    
+    if [ -n "$service_name" ] && systemctl list-unit-files | grep -q "$service_name"; then
+        # Используем systemd сервис
+        log "Using systemd service: $service_name"
+        systemctl start "$service_name"
+        systemctl enable "$service_name"
+        
+        # Ждем запуска сервиса
+        sleep 3
+        
+        # Проверяем статус
+        if systemctl is-active --quiet "$service_name"; then
+            log "$process_name started via systemd service"
+            return 0
+        else
+            log "Failed to start $service_name, falling back to direct process"
+        fi
+    fi
+    
+    # Fallback: прямой запуск процесса (для случаев когда systemd недоступен)
+    log "Starting $process_name directly..."
     if [ -f ".env" ]; then
         export $(grep -v '^#' .env | xargs)
     fi
@@ -130,6 +194,69 @@ check_api_health() {
     
     echo -e "${RED}❌ API health check failed${NC}"
     return 1
+}
+
+# Функция для создания systemd сервисов
+setup_systemd_services() {
+    log "Setting up systemd services..."
+    
+    # Проверяем права root
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${RED}❌ This command requires root privileges (sudo)${NC}"
+        exit 1
+    fi
+    
+    # Создаем сервис для API
+    cat > /etc/systemd/system/positive-support-api.service << EOF
+[Unit]
+Description=Positive Support API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$PROJECT_DIR
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Создаем сервис для Bot
+    cat > /etc/systemd/system/positive-support-bot.service << EOF
+[Unit]
+Description=Positive Support Bot
+After=network.target positive-support-api.service
+Wants=positive-support-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$PROJECT_DIR
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Перезагружаем systemd и включаем сервисы
+    systemctl daemon-reload
+    systemctl enable positive-support-api.service
+    systemctl enable positive-support-bot.service
+    
+    log "✅ Systemd services created and enabled"
+    log "Use 'systemctl start positive-support-api' and 'systemctl start positive-support-bot' to start services"
 }
 
 # Функция для создания бэкапа
@@ -294,6 +421,15 @@ show_status() {
     check_process "API" "main.py"
     check_process "Bot" "bot.py"
     
+    # Показываем статус systemd сервисов если они есть
+    if systemctl list-unit-files | grep -q "positive-support-api.service"; then
+        echo ""
+        echo -e "${YELLOW}🔧 Systemd Services Status:${NC}"
+        systemctl status positive-support-api.service --no-pager -l | head -10
+        echo ""
+        systemctl status positive-support-bot.service --no-pager -l | head -10
+    fi
+    
     if [ -f "${LOG_DIR}/api.log" ]; then
         echo ""
         echo -e "${YELLOW}📄 Recent API logs:${NC}"
@@ -323,6 +459,9 @@ case "${1:-deploy}" in
         sleep 3
         main
         ;;
+    "setup-systemd")
+        setup_systemd_services
+        ;;
     "help"|"-h"|"--help")
         echo "Usage: $0 [command]"
         echo ""
@@ -331,6 +470,7 @@ case "${1:-deploy}" in
         echo "  stop       - Stop all services"
         echo "  status     - Show service status"
         echo "  restart    - Restart all services"
+        echo "  setup-systemd - Create systemd services"
         echo "  help       - Show this help"
         echo ""
         echo "Environment: ${ENVIRONMENT}"

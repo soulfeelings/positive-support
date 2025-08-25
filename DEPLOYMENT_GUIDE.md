@@ -23,15 +23,28 @@
 - **GitHub Actions** - CI/CD пайплайн
 - **Self-hosted Runner** - Агент для выполнения деплоя
 
+### ⚠️ Решение проблемы с завершением процессов
+
+**Проблема:** GitHub Actions автоматически убивает все процессы после завершения workflow.
+
+**Решение:** Использование systemd сервисов для автономной работы процессов.
+
+**Как это работает:**
+1. Workflow создает systemd сервисы перед деплоем
+2. Сервисы работают независимо от GitHub Actions
+3. Процессы продолжают работать после завершения деплоя
+4. Автоматический перезапуск при сбоях
+
 ### Workflow деплоя:
 1. Push в ветку `dev` → Trigger GitHub Actions
 2. GitHub Actions → Self-hosted Runner на сервере
 3. Runner выполняет шаги деплоя:
+   - **Создание systemd сервисов** (новый шаг)
    - Остановка сервисов
    - Обновление кода
    - Установка зависимостей
    - Проверка БД
-   - Запуск сервисов
+   - Запуск сервисов через systemd
    - Health check
 
 ## 📋 Предварительные требования
@@ -309,6 +322,8 @@ GitHub Actions автоматически:
 
 ### 3. Управление через systemd
 
+**Важно:** Systemd сервисы создаются автоматически при деплое и работают независимо от GitHub Actions.
+
 ```bash
 # Использование скрипта управления
 ./manage-services.sh start    # Запуск
@@ -316,6 +331,24 @@ GitHub Actions автоматически:
 ./manage-services.sh restart  # Перезапуск
 ./manage-services.sh status   # Статус
 ./manage-services.sh logs     # Логи
+
+# Прямое управление systemd
+sudo systemctl start positive-support-api.service
+sudo systemctl start positive-support-bot.service
+sudo systemctl stop positive-support-api.service
+sudo systemctl stop positive-support-bot.service
+sudo systemctl restart positive-support-api.service
+sudo systemctl restart positive-support-bot.service
+
+# Проверка статуса
+sudo systemctl is-active positive-support-api.service
+sudo systemctl is-active positive-support-bot.service
+
+# Автозапуск
+sudo systemctl enable positive-support-api.service
+sudo systemctl enable positive-support-bot.service
+sudo systemctl disable positive-support-api.service
+sudo systemctl disable positive-support-bot.service
 ```
 
 ## 📊 Мониторинг и отладка
@@ -477,6 +510,30 @@ psql -h localhost -U bot_user -d support_bot -c "SELECT 1;"
 # Проверка настроек в pg_hba.conf
 sudo nano /etc/postgresql/*/main/pg_hba.conf
 ```
+
+### Проблема: Процессы завершаются после деплоя
+
+**Симптомы:** GitHub Actions успешно деплоит, но процессы не работают после завершения workflow
+
+**Решение:**
+```bash
+# Проверка systemd сервисов
+sudo systemctl status positive-support-api.service
+sudo systemctl status positive-support-bot.service
+
+# Если сервисы не созданы, создаем их
+sudo ./deploy.sh setup-systemd
+
+# Запускаем сервисы
+sudo systemctl start positive-support-api.service
+sudo systemctl start positive-support-bot.service
+
+# Проверяем что они работают
+sudo systemctl is-active positive-support-api.service
+sudo systemctl is-active positive-support-bot.service
+```
+
+**Причина:** GitHub Actions автоматически убивает все процессы после завершения workflow. Systemd сервисы решают эту проблему.
 
 ### Отладочные команды
 

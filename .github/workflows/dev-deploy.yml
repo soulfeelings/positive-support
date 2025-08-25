@@ -19,6 +19,12 @@ jobs:
       with:
         python-version: '3.11'
         
+    - name: Setup systemd services
+      run: |
+        # Создаем systemd сервисы для автономной работы
+        chmod +x ./deploy.sh
+        sudo ./deploy.sh setup-systemd
+        
     - name: Deploy application
       run: |
         # Запускаем полный деплой через наш готовый скрипт
