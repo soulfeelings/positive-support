@@ -45,9 +45,9 @@ def check_config():
         print("")
         print("📋 Добавьте в файл .env:")
         if "ADMIN_BOT_TOKEN" in missing_vars:
-            print("   ADMIN_BOT_TOKEN=ВАШ_ТОКЕН_АДМИН_БОТА")
+            print("   ADMIN_BOT_TOKEN=8233417802:AAGyzmvx1m7MdhGFN-Jk3tTjJ7Q_NgV16h8")
         if "ADMIN_ID" in missing_vars:
-            print("   ADMIN_ID=ВАШ_TELEGRAM_ID")
+            print("   ADMIN_ID=8166609254")
         print("")
         print("💡 Инструкция: ADMIN_BOT_SETUP.md")
         return False

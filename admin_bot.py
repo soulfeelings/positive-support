@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN", "")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
-# Список ID администраторов (добавьте свой Telegram ID)
+# Список ID администраторов
 ADMIN_IDS = [
     int(os.getenv("ADMIN_ID", "0")),  # Основной админ из переменной окружения
     # Можно добавить еще администраторов:
