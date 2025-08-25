@@ -68,15 +68,34 @@ def escape_markdown(text: str) -> str:
         return text
     return text.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]').replace('`', '\\`')
 
-def get_unblock_keyboard(user_id: int):
-    """Создает клавиатуру для разблокировки"""
+def get_admin_keyboard(user_id: int):
+    """Создает клавиатуру для управления пользователем"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Разблокировать", callback_data=f"unblock_{user_id}"),
-            InlineKeyboardButton(text="❌ Оставить блокировку", callback_data=f"keep_block_{user_id}")
+            InlineKeyboardButton(text="📊 Изменить количество жалоб", callback_data=f"change_complaints_{user_id}")
         ],
         [
             InlineKeyboardButton(text="🔄 Поиск другого пользователя", callback_data="new_search")
+        ]
+    ])
+
+def get_complaints_keyboard(user_id: int):
+    """Создает клавиатуру для выбора количества жалоб"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="0️⃣ Обнулить жалобы", callback_data=f"set_complaints_{user_id}_0"),
+            InlineKeyboardButton(text="1️⃣ Одна жалоба", callback_data=f"set_complaints_{user_id}_1")
+        ],
+        [
+            InlineKeyboardButton(text="2️⃣ Две жалобы", callback_data=f"set_complaints_{user_id}_2"),
+            InlineKeyboardButton(text="3️⃣ Три жалобы", callback_data=f"set_complaints_{user_id}_3")
+        ],
+        [
+            InlineKeyboardButton(text="4️⃣ Четыре жалобы", callback_data=f"set_complaints_{user_id}_4"),
+            InlineKeyboardButton(text="5️⃣ Пять жалоб", callback_data=f"set_complaints_{user_id}_5")
+        ],
+        [
+            InlineKeyboardButton(text="❌ Отмена", callback_data="new_search")
         ]
     ])
 
@@ -104,22 +123,23 @@ async def start(message: types.Message, state: FSMContext):
         await message.answer("❌ У вас нет доступа к админ-панели")
         return
     
-    welcome_text = """🔧 **Админ-панель для разблокировки пользователей**
+    welcome_text = """🔧 **Админ-панель для управления пользователями**
 
 🛡️ **Что умеет этот бот:**
-• Поиск заблокированных пользователей по никнейму
+• Поиск пользователей по никнейму
 • Просмотр истории жалоб на пользователя
-• Просмотр сообщений за которые получена блокировка
-• Разблокировка пользователей
+• Управление количеством жалоб (0-5)
+• Автоматическая блокировка/разблокировка
 
 📝 **Как использовать:**
 1. Введите команду /search и никнейм пользователя
-2. Просмотрите причины блокировки
-3. Примите решение о разблокировке
+2. Просмотрите информацию и жалобы
+3. Нажмите "Изменить количество жалоб"
+4. Выберите нужное количество (0-5)
 
 🎯 **Команды:**
-• /search - поиск пользователя для разблокировки
-• /stats - статистика заблокированных пользователей
+• /search - поиск пользователя для управления
+• /stats - статистика с кнопками управления
 • /help - справка"""
     
     await message.answer(welcome_text, parse_mode='Markdown')
@@ -134,7 +154,7 @@ async def search_command(message: types.Message, state: FSMContext):
         return
     
     await state.clear()
-    await message.answer("🔍 **Поиск пользователя для разблокировки**\n\nВведите никнейм пользователя:", parse_mode='Markdown')
+    await message.answer("🔍 **Поиск пользователя для управления**\n\nВведите никнейм пользователя:", parse_mode='Markdown')
     await state.set_state(AdminStates.waiting_nickname)
 
 @dp.message(AdminStates.waiting_nickname)
@@ -219,15 +239,16 @@ async def handle_nickname_search(message: types.Message, state: FSMContext):
                 info_text += f"\n   _Жалоба от:_ {safe_complainer}"
                 info_text += f"\n   _Содержание:_ {safe_content}"
         
-        if not is_blocked:
-            info_text += "\n\n✅ **Пользователь не заблокирован**"
-            await message.answer(info_text, parse_mode='Markdown')
-        else:
+        # Добавляем статус блокировки
+        if is_blocked:
             info_text += f"\n\n🚫 **Пользователь заблокирован**"
             if complaints_count >= 5:
                 info_text += "\n⚠️ _Автоматическая блокировка за превышение лимита жалоб_"
-            
-            await message.answer(info_text, parse_mode='Markdown', reply_markup=get_unblock_keyboard(user_info_id))
+        else:
+            info_text += "\n\n✅ **Пользователь не заблокирован**"
+        
+        # Всегда показываем кнопку управления
+        await message.answer(info_text, parse_mode='Markdown', reply_markup=get_admin_keyboard(user_info_id))
         
         await state.set_state(AdminStates.viewing_user_info)
         await state.update_data(user_id=user_info_id, nickname=user_nickname)
@@ -237,14 +258,57 @@ async def handle_nickname_search(message: types.Message, state: FSMContext):
         await message.answer("❌ Ошибка при поиске пользователя")
         await state.clear()
 
-@dp.callback_query(F.data.startswith("unblock_"))
-async def handle_unblock(callback: types.CallbackQuery, state: FSMContext):
-    """Обработка разблокировки пользователя"""
+@dp.callback_query(F.data.startswith("change_complaints_"))
+async def handle_change_complaints(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка изменения количества жалоб"""
     if not await is_admin(callback.from_user.id):
         await callback.answer("❌ У вас нет доступа")
         return
     
-    user_id_to_unblock = int(callback.data.split("_")[1])
+    user_id = int(callback.data.split("_")[2])
+    
+    try:
+        conn = await get_db_connection()
+        
+        # Получаем информацию о пользователе
+        user = await conn.fetchrow(
+            "SELECT nickname FROM users WHERE user_id = $1", 
+            user_id
+        )
+        
+        await conn.close()
+        
+        if not user:
+            await callback.message.edit_text("❌ Пользователь не найден")
+            await callback.answer()
+            return
+        
+        safe_nickname = escape_markdown(user['nickname'])
+        choice_text = f"""📊 **Изменение количества жалоб**
+
+👤 **Пользователь:** {safe_nickname}
+🆔 **ID:** `{user_id}`
+
+Выберите новое количество жалоб:"""
+        
+        await callback.message.edit_text(choice_text, parse_mode='Markdown', reply_markup=get_complaints_keyboard(user_id))
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error showing complaints menu: {e}")
+        await callback.message.edit_text("❌ Ошибка")
+        await callback.answer()
+
+@dp.callback_query(F.data.startswith("set_complaints_"))
+async def handle_set_complaints(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка установки количества жалоб"""
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет доступа")
+        return
+    
+    parts = callback.data.split("_")
+    user_id = int(parts[2])
+    new_complaints_count = int(parts[3])
     
     try:
         conn = await get_db_connection()
@@ -252,7 +316,7 @@ async def handle_unblock(callback: types.CallbackQuery, state: FSMContext):
         # Получаем информацию о пользователе
         user = await conn.fetchrow(
             "SELECT nickname, is_blocked FROM users WHERE user_id = $1", 
-            user_id_to_unblock
+            user_id
         )
         
         if not user:
@@ -261,95 +325,61 @@ async def handle_unblock(callback: types.CallbackQuery, state: FSMContext):
             await conn.close()
             return
         
-        if not user['is_blocked']:
-            await callback.message.edit_text("✅ Пользователь уже разблокирован")
-            await callback.answer()
-            await conn.close()
-            return
-        
-        # Получаем количество жалоб ДО удаления
-        complaints_count = await conn.fetchval(
+        # Получаем текущее количество жалоб
+        current_complaints = await conn.fetchval(
             "SELECT COUNT(*) FROM complaints WHERE complained_user_id = $1", 
-            user_id_to_unblock
+            user_id
         ) or 0
         
-        # Разблокируем пользователя и обнуляем жалобы
-        await conn.execute(
-            "UPDATE users SET is_blocked = FALSE WHERE user_id = $1", 
-            user_id_to_unblock
-        )
-        
-        # Удаляем все жалобы на этого пользователя
+        # Удаляем все текущие жалобы
         await conn.execute(
             "DELETE FROM complaints WHERE complained_user_id = $1", 
-            user_id_to_unblock
+            user_id
+        )
+        
+        # Создаем новые "фиктивные" жалобы для достижения нужного количества
+        for i in range(new_complaints_count):
+            await conn.execute(
+                """INSERT INTO complaints (complained_user_id, complainer_user_id, message_content, complaint_date)
+                   VALUES ($1, $2, $3, $4)""",
+                user_id,
+                0,  # ID системы
+                f"Административная корректировка #{i+1}",
+                "2024-01-01T00:00:00"
+            )
+        
+        # Обновляем статус блокировки в зависимости от количества жалоб
+        should_be_blocked = new_complaints_count >= 5
+        await conn.execute(
+            "UPDATE users SET is_blocked = $1 WHERE user_id = $2", 
+            should_be_blocked, user_id
         )
         
         await conn.close()
         
         safe_nickname = escape_markdown(user['nickname'])
-        success_text = f"""✅ **Пользователь разблокирован**
+        block_status = "🚫 Заблокирован" if should_be_blocked else "✅ Разблокирован"
+        
+        success_text = f"""📊 **Количество жалоб изменено**
 
-👤 **Никнейм:** {safe_nickname}
-🆔 **ID:** `{user_id_to_unblock}`
-👨‍💼 **Разблокирован администратором:** {escape_markdown(callback.from_user.first_name or 'Админ')}
-🗑️ **Удалено жалоб:** {complaints_count}
+👤 **Пользователь:** {safe_nickname}
+🆔 **ID:** `{user_id}`
+👨‍💼 **Изменил:** {escape_markdown(callback.from_user.first_name or 'Админ')}
 
-🎉 Пользователь может снова пользоваться ботом с чистой репутацией"""
+📈 **Было жалоб:** {current_complaints}
+📊 **Стало жалоб:** {new_complaints_count}
+🔄 **Статус:** {block_status}
+
+{'⚠️ Пользователь автоматически заблокирован за 5+ жалоб' if should_be_blocked else '✅ Пользователь может пользоваться ботом'}"""
         
         await callback.message.edit_text(success_text, parse_mode='Markdown')
-        await callback.answer("✅ Пользователь разблокирован")
+        await callback.answer("✅ Количество жалоб изменено")
         
-        logger.info(f"Admin {callback.from_user.id} unblocked user {user_id_to_unblock} ({user['nickname']}) and cleared all complaints")
-        
-    except Exception as e:
-        logger.error(f"Error unblocking user: {e}")
-        await callback.message.edit_text("❌ Ошибка при разблокировке")
-        await callback.answer()
-    
-    await state.clear()
-
-@dp.callback_query(F.data.startswith("keep_block_"))
-async def handle_keep_block(callback: types.CallbackQuery, state: FSMContext):
-    """Обработка оставления блокировки"""
-    if not await is_admin(callback.from_user.id):
-        await callback.answer("❌ У вас нет доступа")
-        return
-    
-    user_id_to_keep = int(callback.data.split("_")[2])
-    
-    try:
-        conn = await get_db_connection()
-        
-        user = await conn.fetchrow(
-            "SELECT nickname FROM users WHERE user_id = $1", 
-            user_id_to_keep
-        )
-        
-        await conn.close()
-        
-        if not user:
-            await callback.message.edit_text("❌ Пользователь не найден")
-            await callback.answer()
-            return
-        
-        safe_nickname = escape_markdown(user['nickname'])
-        keep_text = f"""❌ **Блокировка оставлена**
-
-👤 **Никнейм:** {safe_nickname}
-🆔 **ID:** `{user_id_to_keep}`
-👨‍💼 **Решение принял:** {escape_markdown(callback.from_user.first_name or 'Админ')}
-
-🚫 Пользователь остается заблокированным"""
-        
-        await callback.message.edit_text(keep_text, parse_mode='Markdown')
-        await callback.answer("❌ Блокировка оставлена")
-        
-        logger.info(f"Admin {callback.from_user.id} kept block for user {user_id_to_keep} ({user['nickname']})")
+        logger.info(f"Admin {callback.from_user.id} changed complaints for user {user_id} ({user['nickname']}) from {current_complaints} to {new_complaints_count}")
         
     except Exception as e:
-        logger.error(f"Error keeping block: {e}")
-        await callback.message.edit_text("❌ Ошибка")
+        logger.error(f"Error setting complaints: {e}")
+        await callback.message.edit_text("❌ Ошибка при изменении жалоб")
         await callback.answer()
     
     await state.clear()
@@ -361,7 +391,7 @@ async def handle_new_search(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("❌ У вас нет доступа")
         return
     
-    await callback.message.edit_text("🔍 **Поиск пользователя для разблокировки**\n\nВведите никнейм пользователя:", parse_mode='Markdown')
+    await callback.message.edit_text("🔍 **Поиск пользователя для управления**\n\nВведите никнейм пользователя:", parse_mode='Markdown')
     await state.set_state(AdminStates.waiting_nickname)
     await callback.answer()
 
@@ -384,10 +414,10 @@ async def stats_command(message: types.Message):
         
         # Топ пользователей по жалобам
         top_complained = await conn.fetch("""
-            SELECT c.original_user_id, u.nickname, u.is_blocked, COUNT(*) as complaint_count
+            SELECT c.complained_user_id, u.nickname, u.is_blocked, COUNT(*) as complaint_count
             FROM complaints c
-            LEFT JOIN users u ON c.original_user_id = u.user_id
-            GROUP BY c.original_user_id, u.nickname, u.is_blocked
+            LEFT JOIN users u ON c.complained_user_id = u.user_id
+            GROUP BY c.complained_user_id, u.nickname, u.is_blocked
             ORDER BY complaint_count DESC
             LIMIT 10
         """)
@@ -404,7 +434,7 @@ async def stats_command(message: types.Message):
 🚨 **Топ по жалобам:**"""
         
         for i, user in enumerate(top_complained, 1):
-            nickname = user['nickname'] or f"ID:{user['original_user_id']}"
+            nickname = user['nickname'] or f"ID:{user['complained_user_id']}"
             safe_nickname = escape_markdown(nickname)
             status = "🚫" if user['is_blocked'] else "✅"
             complaint_count = user['complaint_count']
@@ -413,8 +443,24 @@ async def stats_command(message: types.Message):
         
         if not top_complained:
             stats_text += "\n_Пока нет жалоб_"
-        
-        await message.answer(stats_text, parse_mode='Markdown')
+            await message.answer(stats_text, parse_mode='Markdown')
+        else:
+            # Создаем кнопки для управления пользователями
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+            
+            for i, user in enumerate(top_complained[:5], 1):  # Показываем только первые 5 для кнопок
+                nickname = user['nickname'] or f"ID:{user['complained_user_id']}"
+                safe_nickname = escape_markdown(nickname)[:20]  # Ограничиваем длину для кнопки
+                user_id = user['complained_user_id']
+                complaint_count = user['complaint_count']
+                
+                button_text = f"{i}. {safe_nickname} ({complaint_count})"
+                keyboard.inline_keyboard.append([
+                    InlineKeyboardButton(text=button_text, callback_data=f"change_complaints_{user_id}")
+                ])
+            
+            stats_text += "\n\n💡 _Нажмите на пользователя чтобы изменить количество жалоб_"
+            await message.answer(stats_text, parse_mode='Markdown', reply_markup=keyboard)
         
     except Exception as e:
         logger.error(f"Error getting stats: {e}")
@@ -433,8 +479,8 @@ async def help_command(message: types.Message):
 
 📋 **Команды:**
 • `/start` - главное меню
-• `/search` - поиск пользователя для разблокировки
-• `/stats` - статистика заблокированных пользователей
+• `/search` - поиск пользователя для управления
+• `/stats` - статистика пользователей с кнопками управления
 • `/help` - эта справка
 
 🔍 **Поиск пользователей:**
@@ -442,15 +488,20 @@ async def help_command(message: types.Message):
 • Поиск не чувствителен к регистру
 • Показывает информацию о блокировке и жалобах
 
-⚖️ **Принятие решений:**
-• Просмотрите все жалобы на пользователя
-• Оцените содержание сообщений
-• Примите решение о разблокировке
+📊 **Управление жалобами:**
+• Установка точного количества жалоб (0-5)
+• Автоматическая блокировка при 5+ жалобах
+• Работает с любыми пользователями (не только заблокированными)
+
+⚖️ **Возможности:**
+• Обнулить жалобы - полная "амнистия"
+• Установить 1-4 жалобы - предупреждение
+• Установить 5 жалоб - заблокировать пользователя
 
 🛡️ **Безопасность:**
 • Доступ только для администраторов
 • Все действия логируются
-• Возможность отменить решение"""
+• Показывается история изменений"""
     
     await message.answer(help_text, parse_mode='Markdown')
 
