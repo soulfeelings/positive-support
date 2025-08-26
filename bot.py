@@ -53,9 +53,11 @@ def get_help_inline_kb():
     ])
 
 # Inline клавиатура для профиля
-def get_profile_inline_kb():
+def get_profile_inline_kb(reminders_enabled=True):
+    reminder_text = "🔕 Выключить напоминания" if reminders_enabled else "🔔 Включить напоминания"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")]
+        [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")],
+        [InlineKeyboardButton(text=reminder_text, callback_data="toggle_reminders")]
     ])
 
 
@@ -548,6 +550,7 @@ async def show_profile(message: types.Message, state: FSMContext):
         nickname = profile.get("nickname", "Неизвестно")
         rating = profile.get("rating", 0)
         complaints_count = profile.get("complaints_count", 0)
+        reminders_enabled = profile.get("reminders_enabled", True)
         
         # Экранируем специальные символы в никнейме для Markdown
         safe_nickname = escape_markdown(nickname)
@@ -576,12 +579,16 @@ async def show_profile(message: types.Message, state: FSMContext):
             status_icon = "🚫"
             status_text = "_критическая репутация_"
         
+        # Статус напоминаний
+        reminder_status = "🔔 включены" if reminders_enabled else "🔕 выключены"
+        
         profile_text = f"""👤 **Твой профиль**
 
 📛 Никнейм: **{safe_nickname}**
 ⭐ Рейтинг: **{rating}**
 🏆 Лига: {league}
 📊 Статус: {status_icon} {status_text}
+💭 Напоминания: {reminder_status}
 
 💌 Отправлено сообщений: _временно не доступно_
 🤝 Помогли людям: **{rating}**
@@ -590,7 +597,7 @@ async def show_profile(message: types.Message, state: FSMContext):
         await message.answer(
             profile_text,
             parse_mode='Markdown',
-            reply_markup=get_profile_inline_kb()
+            reply_markup=get_profile_inline_kb(reminders_enabled)
         )
         logger.info(f"Profile shown for user {user_id}: {nickname}")
     else:
@@ -763,6 +770,39 @@ async def handle_change_nickname(callback: types.CallbackQuery, state: FSMContex
         parse_mode='Markdown'
     )
     await state.set_state(UserStates.changing_nickname)
+    await callback.answer()
+
+@dp.callback_query(F.data == "toggle_reminders")
+async def handle_toggle_reminders(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка кнопки переключения напоминаний"""
+    if await check_user_blocked(callback.from_user.id):
+        await send_blocked_callback(callback)
+        return
+    
+    # Переключаем напоминания через API
+    result = await api_request("toggle_reminders", {"user_id": callback.from_user.id})
+    
+    if result.get("status") == "success":
+        reminders_enabled = result.get("reminders_enabled", True)
+        status_text = "включены 🔔" if reminders_enabled else "выключены 🔕"
+        
+        await callback.message.answer(
+            f"💭 **Настройка напоминаний обновлена**\n\n"
+            f"Напоминания теперь {status_text}\n\n"
+            f"{'📬 Ты будешь получать случайные сообщения поддержки раз в день с 12:00 до 20:00' if reminders_enabled else '📪 Автоматические напоминания отключены'}",
+            parse_mode='Markdown',
+            reply_markup=main_kb
+        )
+        logger.info(f"✅ Reminders toggled for user {callback.from_user.id}: {reminders_enabled}")
+    else:
+        await callback.message.answer(
+            "❌ **Ошибка**\n\n"
+            "Не удалось изменить настройку напоминаний. Попробуйте позже.",
+            parse_mode='Markdown',
+            reply_markup=main_kb
+        )
+        logger.error(f"❌ Failed to toggle reminders for user {callback.from_user.id}")
+    
     await callback.answer()
 
 

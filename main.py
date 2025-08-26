@@ -48,6 +48,13 @@ class HelpRequestQuery(BaseModel):
     user_id: int
     last_seen_id: Optional[int] = 0
 
+class ToggleReminders(BaseModel):
+    user_id: int
+
+class ReminderMessageQuery(BaseModel):
+    user_id: int
+    last_seen_id: Optional[int] = 0
+
 class Message(BaseModel):
     user_id: int
     text: Optional[str] = None
@@ -119,7 +126,7 @@ async def get_profile(data: UserProfile):
     try:
         conn = await get_connection()
         user = await conn.fetchrow(
-            "SELECT user_id, nickname, is_blocked FROM users WHERE user_id = $1", 
+            "SELECT user_id, nickname, is_blocked, reminders_enabled FROM users WHERE user_id = $1", 
             data.user_id
         )
         
@@ -148,7 +155,8 @@ async def get_profile(data: UserProfile):
                 "nickname": user["nickname"],
                 "rating": rating,
                 "complaints_count": complaints_count,
-                "is_blocked": user["is_blocked"]
+                "is_blocked": user["is_blocked"],
+                "reminders_enabled": user["reminders_enabled"] if user["reminders_enabled"] is not None else True
             }
         else:
             return {"status": "not_found"}
@@ -390,6 +398,109 @@ async def increment_rating(data: UserProfile):
         
     except Exception as e:
         logger.error(f"Error incrementing rating: {e}")
+        return {"status": "error"}
+
+@app.post("/toggle_reminders")
+async def toggle_reminders(data: ToggleReminders):
+    """Переключение настройки напоминаний"""
+    try:
+        conn = await get_connection()
+        
+        # Получаем текущее состояние напоминаний
+        current_state = await conn.fetchval(
+            "SELECT reminders_enabled FROM users WHERE user_id = $1", 
+            data.user_id
+        )
+        
+        if current_state is None:
+            logger.error(f"User {data.user_id} not found for toggle reminders")
+            await conn.close()
+            return {"status": "error", "message": "User not found"}
+        
+        # Переключаем состояние
+        new_state = not current_state
+        await conn.execute(
+            "UPDATE users SET reminders_enabled = $1 WHERE user_id = $2",
+            new_state, data.user_id
+        )
+        
+        await conn.close()
+        
+        logger.info(f"✅ Reminders toggled for user {data.user_id}: {current_state} -> {new_state}")
+        return {"status": "success", "reminders_enabled": new_state}
+        
+    except Exception as e:
+        logger.error(f"Error toggling reminders: {e}")
+        return {"status": "error"}
+
+@app.post("/get_reminder_message")
+async def get_reminder_message(data: ReminderMessageQuery):
+    """Получение сообщения поддержки для напоминания (аналогично get_help_request)"""
+    try:
+        conn = await get_connection()
+        
+        # Сначала пытаемся найти сообщение с id > last_seen_id
+        message = await conn.fetchrow("""
+            SELECT m.id, m.text, m.file_id, m.message_type, u.nickname, m.user_id 
+            FROM messages m
+            JOIN users u ON m.user_id = u.user_id
+            WHERE m.type = 'support' AND m.user_id != $1 AND m.id > $2
+            ORDER BY m.id ASC LIMIT 1
+        """, data.user_id, data.last_seen_id)
+        
+        # Если не найдено сообщение с id > last_seen_id, начинаем сначала
+        if not message:
+            message = await conn.fetchrow("""
+                SELECT m.id, m.text, m.file_id, m.message_type, u.nickname, m.user_id 
+                FROM messages m
+                JOIN users u ON m.user_id = u.user_id
+                WHERE m.type = 'support' AND m.user_id != $1
+                ORDER BY m.id ASC LIMIT 1
+            """, data.user_id)
+            
+            if message:
+                logger.info(f"No more support messages after id {data.last_seen_id}, starting from beginning for user {data.user_id}")
+        
+        await conn.close()
+        
+        if message:
+            logger.info(f"Reminder message found for user {data.user_id}: message_id={message['id']}")
+            return {
+                "status": "ok",
+                "message": {
+                    "id": message["id"],
+                    "text": message["text"],
+                    "file_id": message["file_id"],
+                    "message_type": message["message_type"],
+                    "nickname": message["nickname"],
+                    "user_id": message["user_id"]
+                }
+            }
+        else:
+            return {"status": "no_messages"}
+    except Exception as e:
+        logger.error(f"Error getting reminder message: {e}")
+        return {"status": "error"}
+
+@app.get("/get_users_with_reminders")
+async def get_users_with_reminders():
+    """Получение списка пользователей с включенными напоминаниями"""
+    try:
+        conn = await get_connection()
+        
+        users = await conn.fetch("""
+            SELECT user_id FROM users 
+            WHERE reminders_enabled = TRUE AND is_blocked = FALSE
+        """)
+        
+        await conn.close()
+        
+        user_ids = [user["user_id"] for user in users]
+        logger.info(f"Found {len(user_ids)} users with enabled reminders")
+        
+        return {"status": "ok", "user_ids": user_ids}
+    except Exception as e:
+        logger.error(f"Error getting users with reminders: {e}")
         return {"status": "error"}
 
 @app.get("/health")
