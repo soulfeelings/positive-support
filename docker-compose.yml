@@ -73,6 +73,30 @@ services:
     volumes:
       - ./logs:/app/logs
 
+  # Reminder Scheduler
+  reminders:
+    build: .
+    container_name: positive_support_reminders
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - API_BASE_URL=http://api:8000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=8998
+      - DB_NAME=support_bot
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+    depends_on:
+      - postgres
+      - api
+    networks:
+      - support_network
+    restart: unless-stopped
+    command: python reminder_scheduler.py
+    volumes:
+      - ./logs:/app/logs
+
 volumes:
   postgres_data:
     driver: local

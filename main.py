@@ -48,6 +48,13 @@ class HelpRequestQuery(BaseModel):
     user_id: int
     last_seen_id: Optional[int] = 0
 
+class ToggleReminders(BaseModel):
+    user_id: int
+
+class ReminderMessageQuery(BaseModel):
+    user_id: int
+    last_seen_id: Optional[int] = 0
+
 class Message(BaseModel):
     user_id: int
     text: Optional[str] = None
@@ -122,10 +129,25 @@ async def get_profile(data: UserProfile):
     """Получение профиля"""
     try:
         conn = await get_connection()
-        user = await conn.fetchrow(
-            "SELECT user_id, nickname, is_blocked, reminders_enabled, last_reminder_message_id FROM users WHERE user_id = $1", 
-            data.user_id
-        )
+        
+        # Проверяем, существует ли столбец reminders_enabled
+        column_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = 'reminders_enabled'
+            )
+        """)
+        
+        if column_exists:
+            user = await conn.fetchrow(
+                "SELECT user_id, nickname, is_blocked, reminders_enabled FROM users WHERE user_id = $1", 
+                data.user_id
+            )
+        else:
+            user = await conn.fetchrow(
+                "SELECT user_id, nickname, is_blocked FROM users WHERE user_id = $1", 
+                data.user_id
+            )
         
         # Получаем рейтинг из таблицы ratings
         try:
@@ -146,6 +168,12 @@ async def get_profile(data: UserProfile):
         await conn.close()
         
         if user:
+            # Определяем значение reminders_enabled
+            if column_exists and "reminders_enabled" in user:
+                reminders_enabled = user["reminders_enabled"] if user["reminders_enabled"] is not None else True
+            else:
+                reminders_enabled = True  # По умолчанию включены
+            
             return {
                 "status": "ok",
                 "user_id": user["user_id"],
@@ -153,8 +181,7 @@ async def get_profile(data: UserProfile):
                 "rating": rating,
                 "complaints_count": complaints_count,
                 "is_blocked": user["is_blocked"],
-                "reminders_enabled": user.get("reminders_enabled", True),
-                "last_reminder_message_id": user.get("last_reminder_message_id", 0)
+                "reminders_enabled": reminders_enabled
             }
         else:
             return {"status": "not_found"}
@@ -398,85 +425,144 @@ async def increment_rating(data: UserProfile):
         logger.error(f"Error incrementing rating: {e}")
         return {"status": "error"}
 
-@app.post("/set_reminder_settings")
-async def set_reminder_settings(data: ReminderSettings):
-    """Включение/выключение напоминаний"""
+@app.post("/toggle_reminders")
+async def toggle_reminders(data: ToggleReminders):
+    """Переключение настройки напоминаний"""
     try:
         conn = await get_connection()
         
-        # Обновляем настройки напоминаний
+        # Проверяем, существует ли столбец reminders_enabled
+        column_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = 'reminders_enabled'
+            )
+        """)
+        
+        if not column_exists:
+            # Если столбца нет, добавляем его
+            await conn.execute("ALTER TABLE users ADD COLUMN reminders_enabled BOOLEAN DEFAULT TRUE")
+            logger.info(f"Added reminders_enabled column to users table")
+        
+        # Получаем текущее состояние напоминаний
+        current_state = await conn.fetchval(
+            "SELECT reminders_enabled FROM users WHERE user_id = $1", 
+            data.user_id
+        )
+        
+        if current_state is None:
+            # Пользователь не найден
+            user_exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM users WHERE user_id = $1)", data.user_id)
+            if not user_exists:
+                await conn.close()
+                return {"status": "error", "message": "User not found"}
+            else:
+                # Пользователь есть, но reminders_enabled NULL - устанавливаем TRUE
+                current_state = True
+                await conn.execute(
+                    "UPDATE users SET reminders_enabled = TRUE WHERE user_id = $1",
+                    data.user_id
+                )
+        
+        # Переключаем состояние
+        new_state = not current_state
         await conn.execute(
             "UPDATE users SET reminders_enabled = $1 WHERE user_id = $2",
-            data.reminders_enabled, data.user_id
+            new_state, data.user_id
         )
         
         await conn.close()
         
-        logger.info(f"✅ Reminder settings updated for user {data.user_id}: {data.reminders_enabled}")
-        return {"status": "success", "reminders_enabled": data.reminders_enabled}
+        logger.info(f"✅ Reminders toggled for user {data.user_id}: {current_state} -> {new_state}")
+        return {"status": "success", "reminders_enabled": new_state}
         
     except Exception as e:
-        logger.error(f"Error setting reminder settings: {e}")
+        logger.error(f"Error toggling reminders: {e}")
         return {"status": "error"}
 
 @app.post("/get_reminder_message")
-async def get_reminder_message(data: UserProfile):
-    """Получение сообщения для напоминания"""
+async def get_reminder_message(data: ReminderMessageQuery):
+    """Получение сообщения поддержки для напоминания (аналогично get_help_request)"""
     try:
         conn = await get_connection()
         
-        # Получаем last_reminder_message_id пользователя
-        user_data = await conn.fetchrow(
-            "SELECT last_reminder_message_id FROM users WHERE user_id = $1",
-            data.user_id
-        )
-        
-        if not user_data:
-            await conn.close()
-            return {"status": "user_not_found"}
-        
-        last_id = user_data["last_reminder_message_id"] or 0
-        
-        # Ищем следующее сообщение с id больше last_reminder_message_id
+        # Сначала пытаемся найти сообщение с id > last_seen_id
         message = await conn.fetchrow("""
-            SELECT m.id, m.text, u.nickname 
+            SELECT m.id, m.text, m.file_id, m.message_type, u.nickname, m.user_id 
             FROM messages m
             JOIN users u ON m.user_id = u.user_id
             WHERE m.type = 'support' AND m.user_id != $1 AND m.id > $2
             ORDER BY m.id ASC LIMIT 1
-        """, data.user_id, last_id)
+        """, data.user_id, data.last_seen_id)
         
-        # Если не найдено, начинаем сначала с минимального ID
+        # Если не найдено сообщение с id > last_seen_id, начинаем сначала
         if not message:
             message = await conn.fetchrow("""
-                SELECT m.id, m.text, u.nickname 
+                SELECT m.id, m.text, m.file_id, m.message_type, u.nickname, m.user_id 
                 FROM messages m
                 JOIN users u ON m.user_id = u.user_id
                 WHERE m.type = 'support' AND m.user_id != $1
                 ORDER BY m.id ASC LIMIT 1
             """, data.user_id)
+            
+            if message:
+                logger.info(f"No more support messages after id {data.last_seen_id}, starting from beginning for user {data.user_id}")
+        
+        await conn.close()
         
         if message:
-            # Обновляем last_reminder_message_id
-            await conn.execute(
-                "UPDATE users SET last_reminder_message_id = $1 WHERE user_id = $2",
-                message["id"], data.user_id
-            )
-            
-            await conn.close()
-            
+            logger.info(f"Reminder message found for user {data.user_id}: message_id={message['id']}")
             return {
                 "status": "ok",
-                "message": message["text"],
-                "nickname": message["nickname"],
-                "message_id": message["id"]
+                "message": {
+                    "id": message["id"],
+                    "text": message["text"],
+                    "file_id": message["file_id"],
+                    "message_type": message["message_type"],
+                    "nickname": message["nickname"],
+                    "user_id": message["user_id"]
+                }
             }
         else:
-            await conn.close()
             return {"status": "no_messages"}
-    
     except Exception as e:
         logger.error(f"Error getting reminder message: {e}")
+        return {"status": "error"}
+
+@app.get("/get_users_with_reminders")
+async def get_users_with_reminders():
+    """Получение списка пользователей с включенными напоминаниями"""
+    try:
+        conn = await get_connection()
+        
+        # Проверяем, существует ли столбец reminders_enabled
+        column_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = 'reminders_enabled'
+            )
+        """)
+        
+        if column_exists:
+            users = await conn.fetch("""
+                SELECT user_id FROM users 
+                WHERE (reminders_enabled = TRUE OR reminders_enabled IS NULL) AND is_blocked = FALSE
+            """)
+        else:
+            # Если столбца нет, считаем что у всех напоминания включены
+            users = await conn.fetch("""
+                SELECT user_id FROM users 
+                WHERE is_blocked = FALSE
+            """)
+        
+        await conn.close()
+        
+        user_ids = [user["user_id"] for user in users]
+        logger.info(f"Found {len(user_ids)} users with enabled reminders")
+        
+        return {"status": "ok", "user_ids": user_ids}
+    except Exception as e:
+        logger.error(f"Error getting users with reminders: {e}")
         return {"status": "error"}
 
 @app.get("/health")

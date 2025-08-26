@@ -5,7 +5,7 @@ import os
 # Настройки подключения из переменных окружения
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = int(os.getenv("DB_PORT", "5432"))
-DB_USER = os.getenv("DB_USER", "bot_user")
+DB_USER = os.getenv("DB_USER", "postgres")  # Docker PostgreSQL default
 DB_PASSWORD = os.getenv("DB_PASSWORD", "8998")
 DB_NAME = os.getenv("DB_NAME", "support_bot")
 
@@ -77,18 +77,11 @@ async def setup_database():
         except Exception as e:
             print(f"ℹ️ Столбец is_blocked уже существует: {e}")
         
-        # Добавляем поля для напоминаний
         try:
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS reminders_enabled BOOLEAN DEFAULT TRUE")
             print("✅ Столбец reminders_enabled добавлен в таблицу users")
         except Exception as e:
             print(f"ℹ️ Столбец reminders_enabled уже существует: {e}")
-        
-        try:
-            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_reminder_message_id INTEGER DEFAULT 0")
-            print("✅ Столбец last_reminder_message_id добавлен в таблицу users")
-        except Exception as e:
-            print(f"ℹ️ Столбец last_reminder_message_id уже существует: {e}")
         
         # Создаем индексы
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(type)")

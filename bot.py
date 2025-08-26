@@ -36,7 +36,8 @@ class UserStates(StatesGroup):
 main_kb = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text="💌 Отправить поддержку"), KeyboardButton(text="🔥 Получить поддержку")],
     [KeyboardButton(text="🆘 Нужна помощь"), KeyboardButton(text="🤝 Помочь кому-нибудь")],
-    [KeyboardButton(text="👤 Профиль")]
+    [KeyboardButton(text="👤 Профиль")],
+    [KeyboardButton(text="🔔 Включить напоминания"), KeyboardButton(text="🔕 Выключить напоминания")]
 ], resize_keyboard=True)
 
 # Inline клавиатура для запросов помощи
@@ -585,7 +586,10 @@ async def show_profile(message: types.Message, state: FSMContext):
             status_text = "_критическая репутация_"
         
         # Статус напоминаний
-        reminders_status = "🔔 _включены_" if reminders_enabled else "🔕 _выключены_"
+        reminder_status = "🔔 включены" if reminders_enabled else "🔕 выключены"
+        
+        # Отладка - логируем значение reminders_enabled
+        logger.info(f"Profile for user {user_id}: reminders_enabled = {reminders_enabled} (type: {type(reminders_enabled)})")
         
         profile_text = f"""👤 **Твой профиль**
 
@@ -593,7 +597,7 @@ async def show_profile(message: types.Message, state: FSMContext):
 ⭐ Рейтинг: **{rating}**
 🏆 Лига: {league}
 📊 Статус: {status_icon} {status_text}
-🔔 Напоминания: {reminders_status}
+💭 Напоминания: {reminder_status}
 
 💌 Отправлено сообщений: _временно не доступно_
 🤝 Помогли людям: **{rating}**
@@ -839,6 +843,103 @@ async def handle_disable_reminders(callback: types.CallbackQuery, state: FSMCont
     
     await callback.answer()
 
+
+
+@dp.message(F.text == "🔔 Включить напоминания")
+async def enable_reminders(message: types.Message, state: FSMContext):
+    """Включить напоминания"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        return
+    
+    await state.clear()
+    user_id = message.from_user.id
+    
+    # Получаем текущий статус
+    profile = await api_request("profile", {"user_id": user_id})
+    
+    if profile.get("status") == "ok":
+        current_reminders = profile.get("reminders_enabled", True)
+        
+        if current_reminders:
+            await message.answer(
+                "💭 <b>Напоминания уже включены!</b>\n\n"
+                "🔔 Ты уже получаешь напоминания раз в день с 12:00 до 20:00",
+                parse_mode='HTML',
+                reply_markup=main_kb
+            )
+        else:
+            # Включаем напоминания
+            result = await api_request("toggle_reminders", {"user_id": user_id})
+            
+            if result.get("status") == "success":
+                await message.answer(
+                    "💭 <b>Напоминания включены!</b>\n\n"
+                    "🔔 Теперь ты будешь получать случайные сообщения поддержки раз в день с 12:00 до 20:00\n\n"
+                    "💡 Это поможет тебе помнить о том, что ты не один! 🌟",
+                    parse_mode='HTML',
+                    reply_markup=main_kb
+                )
+            else:
+                await message.answer(
+                    "❌ <b>Ошибка при включении напоминаний</b>\n\n"
+                    "Попробуй позже",
+                    parse_mode='HTML',
+                    reply_markup=main_kb
+                )
+    else:
+        await message.answer(
+            "❌ Не удалось загрузить профиль",
+            reply_markup=main_kb
+        )
+
+@dp.message(F.text == "🔕 Выключить напоминания")
+async def disable_reminders(message: types.Message, state: FSMContext):
+    """Выключить напоминания"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        return
+    
+    await state.clear()
+    user_id = message.from_user.id
+    
+    # Получаем текущий статус
+    profile = await api_request("profile", {"user_id": user_id})
+    
+    if profile.get("status") == "ok":
+        current_reminders = profile.get("reminders_enabled", True)
+        
+        if not current_reminders:
+            await message.answer(
+                "💭 <b>Напоминания уже выключены!</b>\n\n"
+                "🔕 Ты не получаешь автоматические напоминания",
+                parse_mode='HTML',
+                reply_markup=main_kb
+            )
+        else:
+            # Выключаем напоминания
+            result = await api_request("toggle_reminders", {"user_id": user_id})
+            
+            if result.get("status") == "success":
+                await message.answer(
+                    "💭 <b>Напоминания выключены!</b>\n\n"
+                    "🔕 Ты больше не будешь получать автоматические напоминания\n\n"
+                    "💡 Ты всегда можешь включить их снова кнопкой '🔔 Включить напоминания'",
+                    parse_mode='HTML',
+                    reply_markup=main_kb
+                )
+            else:
+                await message.answer(
+                    "❌ <b>Ошибка при выключении напоминаний</b>\n\n"
+                    "Попробуй позже",
+                    parse_mode='HTML',
+                    reply_markup=main_kb
+                )
+    else:
+        await message.answer(
+            "❌ Не удалось загрузить профиль",
+            reply_markup=main_kb
+        )
 
 
 @dp.message()
