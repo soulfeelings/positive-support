@@ -125,10 +125,25 @@ async def get_profile(data: UserProfile):
     """Получение профиля"""
     try:
         conn = await get_connection()
-        user = await conn.fetchrow(
-            "SELECT user_id, nickname, is_blocked, reminders_enabled FROM users WHERE user_id = $1", 
-            data.user_id
-        )
+        
+        # Проверяем, существует ли столбец reminders_enabled
+        column_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = 'reminders_enabled'
+            )
+        """)
+        
+        if column_exists:
+            user = await conn.fetchrow(
+                "SELECT user_id, nickname, is_blocked, reminders_enabled FROM users WHERE user_id = $1", 
+                data.user_id
+            )
+        else:
+            user = await conn.fetchrow(
+                "SELECT user_id, nickname, is_blocked FROM users WHERE user_id = $1", 
+                data.user_id
+            )
         
         # Получаем рейтинг из таблицы ratings
         try:
@@ -149,6 +164,12 @@ async def get_profile(data: UserProfile):
         await conn.close()
         
         if user:
+            # Определяем значение reminders_enabled
+            if column_exists and "reminders_enabled" in user:
+                reminders_enabled = user["reminders_enabled"] if user["reminders_enabled"] is not None else True
+            else:
+                reminders_enabled = True  # По умолчанию включены
+            
             return {
                 "status": "ok",
                 "user_id": user["user_id"],
@@ -156,7 +177,7 @@ async def get_profile(data: UserProfile):
                 "rating": rating,
                 "complaints_count": complaints_count,
                 "is_blocked": user["is_blocked"],
-                "reminders_enabled": user["reminders_enabled"] if user["reminders_enabled"] is not None else True
+                "reminders_enabled": reminders_enabled
             }
         else:
             return {"status": "not_found"}
@@ -406,6 +427,19 @@ async def toggle_reminders(data: ToggleReminders):
     try:
         conn = await get_connection()
         
+        # Проверяем, существует ли столбец reminders_enabled
+        column_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = 'reminders_enabled'
+            )
+        """)
+        
+        if not column_exists:
+            # Если столбца нет, добавляем его
+            await conn.execute("ALTER TABLE users ADD COLUMN reminders_enabled BOOLEAN DEFAULT TRUE")
+            logger.info(f"Added reminders_enabled column to users table")
+        
         # Получаем текущее состояние напоминаний
         current_state = await conn.fetchval(
             "SELECT reminders_enabled FROM users WHERE user_id = $1", 
@@ -413,9 +447,18 @@ async def toggle_reminders(data: ToggleReminders):
         )
         
         if current_state is None:
-            logger.error(f"User {data.user_id} not found for toggle reminders")
-            await conn.close()
-            return {"status": "error", "message": "User not found"}
+            # Пользователь не найден
+            user_exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM users WHERE user_id = $1)", data.user_id)
+            if not user_exists:
+                await conn.close()
+                return {"status": "error", "message": "User not found"}
+            else:
+                # Пользователь есть, но reminders_enabled NULL - устанавливаем TRUE
+                current_state = True
+                await conn.execute(
+                    "UPDATE users SET reminders_enabled = TRUE WHERE user_id = $1",
+                    data.user_id
+                )
         
         # Переключаем состояние
         new_state = not current_state
@@ -488,10 +531,25 @@ async def get_users_with_reminders():
     try:
         conn = await get_connection()
         
-        users = await conn.fetch("""
-            SELECT user_id FROM users 
-            WHERE reminders_enabled = TRUE AND is_blocked = FALSE
+        # Проверяем, существует ли столбец reminders_enabled
+        column_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'users' AND column_name = 'reminders_enabled'
+            )
         """)
+        
+        if column_exists:
+            users = await conn.fetch("""
+                SELECT user_id FROM users 
+                WHERE (reminders_enabled = TRUE OR reminders_enabled IS NULL) AND is_blocked = FALSE
+            """)
+        else:
+            # Если столбца нет, считаем что у всех напоминания включены
+            users = await conn.fetch("""
+                SELECT user_id FROM users 
+                WHERE is_blocked = FALSE
+            """)
         
         await conn.close()
         
