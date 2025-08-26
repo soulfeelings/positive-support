@@ -786,13 +786,73 @@ async def handle_toggle_reminders(callback: types.CallbackQuery, state: FSMConte
         reminders_enabled = result.get("reminders_enabled", True)
         status_text = "включены 🔔" if reminders_enabled else "выключены 🔕"
         
+        # Отправляем уведомление о изменении
         await callback.message.answer(
             f"💭 **Настройка напоминаний обновлена**\n\n"
             f"Напоминания теперь {status_text}\n\n"
             f"{'📬 Ты будешь получать случайные сообщения поддержки раз в день с 12:00 до 20:00' if reminders_enabled else '📪 Автоматические напоминания отключены'}",
-            parse_mode='Markdown',
-            reply_markup=main_kb
+            parse_mode='Markdown'
         )
+        
+        # Получаем обновленный профиль и показываем его с новой кнопкой
+        user_id = callback.from_user.id
+        profile = await api_request("profile", {"user_id": user_id})
+        
+        if profile.get("status") == "ok":
+            nickname = profile.get("nickname", "Неизвестно")
+            rating = profile.get("rating", 0)
+            complaints_count = profile.get("complaints_count", 0)
+            reminders_enabled = profile.get("reminders_enabled", True)
+            
+            # Экранируем специальные символы в никнейме для Markdown
+            safe_nickname = escape_markdown(nickname)
+            
+            # Определяем лигу по рейтингу
+            if rating < 20:
+                league = "_нет лиги_"
+            elif rating < 50:
+                league = "🥉 **Бронзовая лига**"
+            elif rating < 100:
+                league = "🥈 **Серебряная лига**"
+            else:
+                league = "🥇 **Золотая лига**"
+            
+            # Определяем статус по количеству жалоб
+            if complaints_count == 0:
+                status_icon = "✅"
+                status_text = "_отличная репутация_"
+            elif complaints_count <= 2:
+                status_icon = "⚠️"
+                status_text = "_внимание к контенту_"
+            elif complaints_count <= 5:
+                status_icon = "🔴"
+                status_text = "_множественные жалобы_"
+            else:
+                status_icon = "🚫"
+                status_text = "_критическая репутация_"
+            
+            # Статус напоминаний
+            reminder_status = "🔔 включены" if reminders_enabled else "🔕 выключены"
+            
+            profile_text = f"""👤 **Твой профиль**
+
+📛 Никнейм: **{safe_nickname}**
+⭐ Рейтинг: **{rating}**
+🏆 Лига: {league}
+📊 Статус: {status_icon} {status_text}
+💭 Напоминания: {reminder_status}
+
+💌 Отправлено сообщений: _временно не доступно_
+🤝 Помогли людям: **{rating}**
+🚨 Жалобы на вас: **{complaints_count}**"""
+            
+            # Редактируем исходное сообщение с профилем, обновляя кнопки
+            await callback.message.edit_text(
+                profile_text,
+                parse_mode='Markdown',
+                reply_markup=get_profile_inline_kb(reminders_enabled)
+            )
+        
         logger.info(f"✅ Reminders toggled for user {callback.from_user.id}: {reminders_enabled}")
     else:
         await callback.message.answer(
