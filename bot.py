@@ -582,6 +582,9 @@ async def show_profile(message: types.Message, state: FSMContext):
         # Статус напоминаний
         reminder_status = "🔔 включены" if reminders_enabled else "🔕 выключены"
         
+        # Отладка - логируем значение reminders_enabled
+        logger.info(f"Profile for user {user_id}: reminders_enabled = {reminders_enabled} (type: {type(reminders_enabled)})")
+        
         profile_text = f"""👤 **Твой профиль**
 
 📛 Никнейм: **{safe_nickname}**
