@@ -795,9 +795,9 @@ async def handle_toggle_reminders(callback: types.CallbackQuery, state: FSMConte
             
             # Отправляем уведомление
             await callback.message.answer(
-                f"💭 **Настройка обновлена!**\n\n"
+                f"💭 <b>Настройка обновлена!</b>\n\n"
                 f"Напоминания теперь {status_text}",
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
             
             # Получаем и показываем обновленный профиль
@@ -810,18 +810,18 @@ async def handle_toggle_reminders(callback: types.CallbackQuery, state: FSMConte
             logger.error(f"❌ API Error: {result}")
             
             await callback.message.answer(
-                f"❌ **Ошибка при переключении**\n\n"
+                f"❌ <b>Ошибка при переключении</b>\n\n"
                 f"Детали: {error_msg}\n\n"
                 f"Попробуйте еще раз через несколько секунд.",
-                parse_mode='Markdown'
+                parse_mode='HTML'
             )
             
     except Exception as e:
         logger.error(f"❌ Exception in toggle_reminders: {e}")
         await callback.message.answer(
-            "❌ **Произошла ошибка**\n\n"
+            "❌ <b>Произошла ошибка</b>\n\n"
             "Попробуйте позже или обратитесь к администратору.",
-            parse_mode='Markdown'
+            parse_mode='HTML'
         )
 
 async def show_updated_profile(message, user_id):
@@ -912,32 +912,32 @@ async def handle_test_reminders(callback: types.CallbackQuery, state: FSMContext
         # Проверяем профиль
         profile_result = await api_request("profile", {"user_id": user_id})
         await callback.message.answer(
-            f"📋 **Результат profile API:**\n"
-            f"```json\n{str(profile_result)}\n```",
-            parse_mode='Markdown'
+            f"📋 Результат profile API:\n"
+            f"<code>{str(profile_result)}</code>",
+            parse_mode='HTML'
         )
         
         # Пробуем переключить напоминания
         toggle_result = await api_request("toggle_reminders", {"user_id": user_id})
         await callback.message.answer(
-            f"🔄 **Результат toggle_reminders API:**\n"
-            f"```json\n{str(toggle_result)}\n```",
-            parse_mode='Markdown'
+            f"🔄 Результат toggle_reminders API:\n"
+            f"<code>{str(toggle_result)}</code>",
+            parse_mode='HTML'
         )
         
         # Проверяем профиль после переключения
         profile_result2 = await api_request("profile", {"user_id": user_id})
         await callback.message.answer(
-            f"📋 **Профиль после переключения:**\n"
-            f"```json\n{str(profile_result2)}\n```",
-            parse_mode='Markdown'
+            f"📋 Профиль после переключения:\n"
+            f"<code>{str(profile_result2)}</code>",
+            parse_mode='HTML'
         )
         
     except Exception as e:
         await callback.message.answer(
-            f"❌ **Ошибка в тестах:**\n"
-            f"```\n{str(e)}\n```",
-            parse_mode='Markdown'
+            f"❌ Ошибка в тестах:\n"
+            f"<code>{str(e)}</code>",
+            parse_mode='HTML'
         )
 
 
