@@ -57,8 +57,7 @@ def get_profile_inline_kb(reminders_enabled=True):
     reminder_text = "🔕 Выключить напоминания" if reminders_enabled else "🔔 Включить напоминания"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")],
-        [InlineKeyboardButton(text=reminder_text, callback_data="toggle_reminders")],
-        [InlineKeyboardButton(text="🔧 Тест напоминаний", callback_data="test_reminders")]
+        [InlineKeyboardButton(text=reminder_text, callback_data="toggle_reminders")]
     ])
 
 
@@ -892,52 +891,6 @@ async def show_updated_profile(message, user_id):
         await message.answer(
             "❌ Ошибка при обновлении профиля",
             parse_mode='Markdown'
-        )
-
-@dp.callback_query(F.data == "test_reminders")
-async def handle_test_reminders(callback: types.CallbackQuery, state: FSMContext):
-    """Тестовая кнопка для диагностики"""
-    await callback.answer()
-    
-    user_id = callback.from_user.id
-    
-    # Тестируем API напрямую
-    await callback.message.answer(
-        f"🔧 **Диагностика для пользователя {user_id}**\n\n"
-        f"Проверяем доступность API...",
-        parse_mode='Markdown'
-    )
-    
-    try:
-        # Проверяем профиль
-        profile_result = await api_request("profile", {"user_id": user_id})
-        await callback.message.answer(
-            f"📋 Результат profile API:\n"
-            f"<code>{str(profile_result)}</code>",
-            parse_mode='HTML'
-        )
-        
-        # Пробуем переключить напоминания
-        toggle_result = await api_request("toggle_reminders", {"user_id": user_id})
-        await callback.message.answer(
-            f"🔄 Результат toggle_reminders API:\n"
-            f"<code>{str(toggle_result)}</code>",
-            parse_mode='HTML'
-        )
-        
-        # Проверяем профиль после переключения
-        profile_result2 = await api_request("profile", {"user_id": user_id})
-        await callback.message.answer(
-            f"📋 Профиль после переключения:\n"
-            f"<code>{str(profile_result2)}</code>",
-            parse_mode='HTML'
-        )
-        
-    except Exception as e:
-        await callback.message.answer(
-            f"❌ Ошибка в тестах:\n"
-            f"<code>{str(e)}</code>",
-            parse_mode='HTML'
         )
 
 
