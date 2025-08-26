@@ -54,6 +54,10 @@ class Message(BaseModel):
     file_id: Optional[str] = None
     message_type: str = "text"  # "text", "voice" или "video_note"
 
+class ReminderSettings(BaseModel):
+    user_id: int
+    reminders_enabled: bool
+
 # API эндпоинты
 @app.get("/")
 async def index():
@@ -119,7 +123,7 @@ async def get_profile(data: UserProfile):
     try:
         conn = await get_connection()
         user = await conn.fetchrow(
-            "SELECT user_id, nickname, is_blocked FROM users WHERE user_id = $1", 
+            "SELECT user_id, nickname, is_blocked, reminders_enabled, last_reminder_message_id FROM users WHERE user_id = $1", 
             data.user_id
         )
         
@@ -148,7 +152,9 @@ async def get_profile(data: UserProfile):
                 "nickname": user["nickname"],
                 "rating": rating,
                 "complaints_count": complaints_count,
-                "is_blocked": user["is_blocked"]
+                "is_blocked": user["is_blocked"],
+                "reminders_enabled": user.get("reminders_enabled", True),
+                "last_reminder_message_id": user.get("last_reminder_message_id", 0)
             }
         else:
             return {"status": "not_found"}
@@ -390,6 +396,87 @@ async def increment_rating(data: UserProfile):
         
     except Exception as e:
         logger.error(f"Error incrementing rating: {e}")
+        return {"status": "error"}
+
+@app.post("/set_reminder_settings")
+async def set_reminder_settings(data: ReminderSettings):
+    """Включение/выключение напоминаний"""
+    try:
+        conn = await get_connection()
+        
+        # Обновляем настройки напоминаний
+        await conn.execute(
+            "UPDATE users SET reminders_enabled = $1 WHERE user_id = $2",
+            data.reminders_enabled, data.user_id
+        )
+        
+        await conn.close()
+        
+        logger.info(f"✅ Reminder settings updated for user {data.user_id}: {data.reminders_enabled}")
+        return {"status": "success", "reminders_enabled": data.reminders_enabled}
+        
+    except Exception as e:
+        logger.error(f"Error setting reminder settings: {e}")
+        return {"status": "error"}
+
+@app.post("/get_reminder_message")
+async def get_reminder_message(data: UserProfile):
+    """Получение сообщения для напоминания"""
+    try:
+        conn = await get_connection()
+        
+        # Получаем last_reminder_message_id пользователя
+        user_data = await conn.fetchrow(
+            "SELECT last_reminder_message_id FROM users WHERE user_id = $1",
+            data.user_id
+        )
+        
+        if not user_data:
+            await conn.close()
+            return {"status": "user_not_found"}
+        
+        last_id = user_data["last_reminder_message_id"] or 0
+        
+        # Ищем следующее сообщение с id больше last_reminder_message_id
+        message = await conn.fetchrow("""
+            SELECT m.id, m.text, u.nickname 
+            FROM messages m
+            JOIN users u ON m.user_id = u.user_id
+            WHERE m.type = 'support' AND m.user_id != $1 AND m.id > $2
+            ORDER BY m.id ASC LIMIT 1
+        """, data.user_id, last_id)
+        
+        # Если не найдено, начинаем сначала с минимального ID
+        if not message:
+            message = await conn.fetchrow("""
+                SELECT m.id, m.text, u.nickname 
+                FROM messages m
+                JOIN users u ON m.user_id = u.user_id
+                WHERE m.type = 'support' AND m.user_id != $1
+                ORDER BY m.id ASC LIMIT 1
+            """, data.user_id)
+        
+        if message:
+            # Обновляем last_reminder_message_id
+            await conn.execute(
+                "UPDATE users SET last_reminder_message_id = $1 WHERE user_id = $2",
+                message["id"], data.user_id
+            )
+            
+            await conn.close()
+            
+            return {
+                "status": "ok",
+                "message": message["text"],
+                "nickname": message["nickname"],
+                "message_id": message["id"]
+            }
+        else:
+            await conn.close()
+            return {"status": "no_messages"}
+    
+    except Exception as e:
+        logger.error(f"Error getting reminder message: {e}")
         return {"status": "error"}
 
 @app.get("/health")
