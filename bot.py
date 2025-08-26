@@ -57,7 +57,8 @@ def get_profile_inline_kb(reminders_enabled=True):
     reminder_text = "🔕 Выключить напоминания" if reminders_enabled else "🔔 Включить напоминания"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")],
-        [InlineKeyboardButton(text=reminder_text, callback_data="toggle_reminders")]
+        [InlineKeyboardButton(text=reminder_text, callback_data="toggle_reminders")],
+        [InlineKeyboardButton(text="🔧 Тест напоминаний", callback_data="test_reminders")]
     ])
 
 
@@ -779,81 +780,92 @@ async def handle_toggle_reminders(callback: types.CallbackQuery, state: FSMConte
         await send_blocked_callback(callback)
         return
     
-    # Переключаем напоминания через API
-    logger.info(f"Toggling reminders for user {callback.from_user.id}")
-    result = await api_request("toggle_reminders", {"user_id": callback.from_user.id})
-    logger.info(f"Toggle result: {result}")
-    
-    if result.get("status") == "success":
-        reminders_enabled = result.get("reminders_enabled", True)
-        status_text = "включены 🔔" if reminders_enabled else "выключены 🔕"
+    try:
+        # Сначала отвечаем на callback, чтобы убрать "loading"
+        await callback.answer()
         
-        # Обновляем только кнопки, не трогая текст сообщения
-        try:
-            await callback.message.edit_reply_markup(
-                reply_markup=get_profile_inline_kb(reminders_enabled)
-            )
+        # Переключаем напоминания через API
+        logger.info(f"🔄 Toggling reminders for user {callback.from_user.id}")
+        result = await api_request("toggle_reminders", {"user_id": callback.from_user.id})
+        logger.info(f"📋 Toggle API result: {result}")
+        
+        if result.get("status") == "success":
+            reminders_enabled = result.get("reminders_enabled", True)
+            status_text = "включены 🔔" if reminders_enabled else "выключены 🔕"
             
-            # Отправляем уведомление о изменении через callback answer
-            notification_text = f"💭 Напоминания {status_text}"
-            await callback.answer(
-                text=notification_text,
-                show_alert=True
-            )
-            
-        except Exception as e:
-            logger.warning(f"Failed to update inline keyboard: {e}")
-            
-            # Отправляем уведомление о изменении через обычное сообщение
+            # Отправляем уведомление
             await callback.message.answer(
-                f"💭 **Настройка напоминаний обновлена**\n\n"
-                f"Напоминания теперь {status_text}\n\n"
-                f"{'📬 Ты будешь получать случайные сообщения поддержки раз в день с 12:00 до 20:00' if reminders_enabled else '📪 Автоматические напоминания отключены'}\n\n"
-                f"_Обновленный профиль ниже:_",
+                f"💭 **Настройка обновлена!**\n\n"
+                f"Напоминания теперь {status_text}",
                 parse_mode='Markdown'
             )
             
-            # Отправляем новое сообщение с профилем
-            user_id = callback.from_user.id
-            profile = await api_request("profile", {"user_id": user_id})
+            # Получаем и показываем обновленный профиль
+            await show_updated_profile(callback.message, callback.from_user.id)
             
-            if profile.get("status") == "ok":
-                nickname = profile.get("nickname", "Неизвестно")
-                rating = profile.get("rating", 0)
-                complaints_count = profile.get("complaints_count", 0)
-                updated_reminders_enabled = profile.get("reminders_enabled", True)
-                
-                # Экранируем специальные символы в никнейме для Markdown
-                safe_nickname = escape_markdown(nickname)
-                
-                # Определяем лигу по рейтингу
-                if rating < 20:
-                    league = "_нет лиги_"
-                elif rating < 50:
-                    league = "🥉 **Бронзовая лига**"
-                elif rating < 100:
-                    league = "🥈 **Серебряная лига**"
-                else:
-                    league = "🥇 **Золотая лига**"
-                
-                # Определяем статус по количеству жалоб
-                if complaints_count == 0:
-                    status_icon = "✅"
-                    status_text = "_отличная репутация_"
-                elif complaints_count <= 2:
-                    status_icon = "⚠️"
-                    status_text = "_внимание к контенту_"
-                elif complaints_count <= 5:
-                    status_icon = "🔴"
-                    status_text = "_множественные жалобы_"
-                else:
-                    status_icon = "🚫"
-                    status_text = "_критическая репутация_"
-                
-                # Статус напоминаний
-                reminder_status = "🔔 включены" if updated_reminders_enabled else "🔕 выключены"
-                
-                profile_text = f"""👤 **Твой профиль**
+            logger.info(f"✅ Reminders successfully toggled for user {callback.from_user.id}: {reminders_enabled}")
+            
+        else:
+            error_msg = result.get("message", "Неизвестная ошибка")
+            logger.error(f"❌ API Error: {result}")
+            
+            await callback.message.answer(
+                f"❌ **Ошибка при переключении**\n\n"
+                f"Детали: {error_msg}\n\n"
+                f"Попробуйте еще раз через несколько секунд.",
+                parse_mode='Markdown'
+            )
+            
+    except Exception as e:
+        logger.error(f"❌ Exception in toggle_reminders: {e}")
+        await callback.message.answer(
+            "❌ **Произошла ошибка**\n\n"
+            "Попробуйте позже или обратитесь к администратору.",
+            parse_mode='Markdown'
+        )
+
+async def show_updated_profile(message, user_id):
+    """Показать обновленный профиль пользователя"""
+    try:
+        profile = await api_request("profile", {"user_id": user_id})
+        
+        if profile.get("status") == "ok":
+            nickname = profile.get("nickname", "Неизвестно")
+            rating = profile.get("rating", 0)
+            complaints_count = profile.get("complaints_count", 0)
+            reminders_enabled = profile.get("reminders_enabled", True)
+            
+            # Экранируем специальные символы в никнейме для Markdown
+            safe_nickname = escape_markdown(nickname)
+            
+            # Определяем лигу по рейтингу
+            if rating < 20:
+                league = "_нет лиги_"
+            elif rating < 50:
+                league = "🥉 **Бронзовая лига**"
+            elif rating < 100:
+                league = "🥈 **Серебряная лига**"
+            else:
+                league = "🥇 **Золотая лига**"
+            
+            # Определяем статус по количеству жалоб
+            if complaints_count == 0:
+                status_icon = "✅"
+                status_text = "_отличная репутация_"
+            elif complaints_count <= 2:
+                status_icon = "⚠️"
+                status_text = "_внимание к контенту_"
+            elif complaints_count <= 5:
+                status_icon = "🔴"
+                status_text = "_множественные жалобы_"
+            else:
+                status_icon = "🚫"
+                status_text = "_критическая репутация_"
+            
+            # Статус напоминаний
+            reminder_status = "🔔 включены" if reminders_enabled else "🔕 выключены"
+            
+            profile_text = f"""👤 **Обновленный профиль**
 
 📛 Никнейм: **{safe_nickname}**
 ⭐ Рейтинг: **{rating}**
@@ -864,29 +876,69 @@ async def handle_toggle_reminders(callback: types.CallbackQuery, state: FSMConte
 💌 Отправлено сообщений: _временно не доступно_
 🤝 Помогли людям: **{rating}**
 🚨 Жалобы на вас: **{complaints_count}**"""
-                
-                await callback.message.answer(
-                    profile_text,
-                    parse_mode='Markdown',
-                    reply_markup=get_profile_inline_kb(updated_reminders_enabled)
-                )
             
-            await callback.answer()  # Закрываем loading индикатор
-        
-        logger.info(f"✅ Reminders toggled for user {callback.from_user.id}: {reminders_enabled}")
-    else:
-        error_msg = result.get("message", "Неизвестная ошибка")
-        await callback.message.answer(
-            f"❌ **Ошибка**\n\n"
-            f"Не удалось изменить настройку напоминаний.\n"
-            f"Детали: {error_msg}\n\n"
-            f"Попробуйте позже.",
-            parse_mode='Markdown',
-            reply_markup=main_kb
+            await message.answer(
+                profile_text,
+                parse_mode='Markdown',
+                reply_markup=get_profile_inline_kb(reminders_enabled)
+            )
+        else:
+            await message.answer(
+                "❌ Не удалось обновить профиль",
+                parse_mode='Markdown'
+            )
+    except Exception as e:
+        logger.error(f"Error showing updated profile: {e}")
+        await message.answer(
+            "❌ Ошибка при обновлении профиля",
+            parse_mode='Markdown'
         )
-        logger.error(f"❌ Failed to toggle reminders for user {callback.from_user.id}: {result}")
-        await callback.answer()
 
+@dp.callback_query(F.data == "test_reminders")
+async def handle_test_reminders(callback: types.CallbackQuery, state: FSMContext):
+    """Тестовая кнопка для диагностики"""
+    await callback.answer()
+    
+    user_id = callback.from_user.id
+    
+    # Тестируем API напрямую
+    await callback.message.answer(
+        f"🔧 **Диагностика для пользователя {user_id}**\n\n"
+        f"Проверяем доступность API...",
+        parse_mode='Markdown'
+    )
+    
+    try:
+        # Проверяем профиль
+        profile_result = await api_request("profile", {"user_id": user_id})
+        await callback.message.answer(
+            f"📋 **Результат profile API:**\n"
+            f"```json\n{str(profile_result)}\n```",
+            parse_mode='Markdown'
+        )
+        
+        # Пробуем переключить напоминания
+        toggle_result = await api_request("toggle_reminders", {"user_id": user_id})
+        await callback.message.answer(
+            f"🔄 **Результат toggle_reminders API:**\n"
+            f"```json\n{str(toggle_result)}\n```",
+            parse_mode='Markdown'
+        )
+        
+        # Проверяем профиль после переключения
+        profile_result2 = await api_request("profile", {"user_id": user_id})
+        await callback.message.answer(
+            f"📋 **Профиль после переключения:**\n"
+            f"```json\n{str(profile_result2)}\n```",
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        await callback.message.answer(
+            f"❌ **Ошибка в тестах:**\n"
+            f"```\n{str(e)}\n```",
+            parse_mode='Markdown'
+        )
 
 
 @dp.message()
