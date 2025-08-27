@@ -781,67 +781,67 @@ async def handle_change_nickname(callback: types.CallbackQuery, state: FSMContex
     await state.set_state(UserStates.changing_nickname)
     await callback.answer()
 
-@dp.callback_query(F.data == "enable_reminders")
-async def handle_enable_reminders(callback: types.CallbackQuery, state: FSMContext):
-    """Обработка кнопки 'Включить напоминание'"""
-    if await check_user_blocked(callback.from_user.id):
-        await send_blocked_callback(callback)
-        return
-    
-    user_id = callback.from_user.id
-    
-    # Обновляем настройки напоминаний
-    result = await api_request("set_reminder_settings", {
-        "user_id": user_id,
-        "reminders_enabled": True
-    })
-    
-    if result.get("status") == "success":
-        await callback.message.answer(
-            "🔔 **Напоминания включены!**\n\n"
-            "Теперь ты будешь получать ежедневные сообщения поддержки с 12:00 до 20:00.\n\n"
-            "💝 _Это поможет тебе оставаться позитивным каждый день!_",
-            parse_mode='Markdown'
-        )
-        logger.info(f"✅ Reminders enabled for user {user_id}")
-    else:
-        await callback.message.answer(
-            "❌ Не удалось включить напоминания. Попробуй позже."
-        )
-        logger.error(f"❌ Failed to enable reminders for user {user_id}")
-    
-    await callback.answer()
-
-@dp.callback_query(F.data == "disable_reminders") 
-async def handle_disable_reminders(callback: types.CallbackQuery, state: FSMContext):
-    """Обработка кнопки 'Выключить напоминание'"""
-    if await check_user_blocked(callback.from_user.id):
-        await send_blocked_callback(callback)
-        return
-    
-    user_id = callback.from_user.id
-    
-    # Обновляем настройки напоминаний
-    result = await api_request("set_reminder_settings", {
-        "user_id": user_id,
-        "reminders_enabled": False
-    })
-    
-    if result.get("status") == "success":
-        await callback.message.answer(
-            "🔕 **Напоминания выключены**\n\n"
-            "Ты больше не будешь получать ежедневные сообщения поддержки.\n\n"
-            "💡 _Ты всегда можешь включить их обратно в профиле_",
-            parse_mode='Markdown'
-        )
-        logger.info(f"✅ Reminders disabled for user {user_id}")
-    else:
-        await callback.message.answer(
-            "❌ Не удалось выключить напоминания. Попробуй позже."
-        )
-        logger.error(f"❌ Failed to disable reminders for user {user_id}")
-    
-    await callback.answer()
+# @dp.callback_query(F.data == "enable_reminders")
+# async def handle_enable_reminders(callback: types.CallbackQuery, state: FSMContext):
+#     """Обработка кнопки 'Включить напоминание'"""
+#     if await check_user_blocked(callback.from_user.id):
+#         await send_blocked_callback(callback)
+#         return
+#     
+#     user_id = callback.from_user.id
+#     
+#     # Обновляем настройки напоминаний
+#     result = await api_request("set_reminder_settings", {
+#         "user_id": user_id,
+#         "reminders_enabled": True
+#     })
+#     
+#     if result.get("status") == "success":
+#         await callback.message.answer(
+#             "🔔 **Напоминания включены!**\n\n"
+#             "Теперь ты будешь получать ежедневные сообщения поддержки с 12:00 до 20:00.\n\n"
+#             "💝 _Это поможет тебе оставаться позитивным каждый день!_",
+#             parse_mode='Markdown'
+#         )
+#         logger.info(f"✅ Reminders enabled for user {user_id}")
+#     else:
+#         await callback.message.answer(
+#             "❌ Не удалось включить напоминания. Попробуй позже."
+#         )
+#         logger.error(f"❌ Failed to enable reminders for user {user_id}")
+#     
+#     await callback.answer()
+# 
+# @dp.callback_query(F.data == "disable_reminders") 
+# async def handle_disable_reminders(callback: types.CallbackQuery, state: FSMContext):
+#     """Обработка кнопки 'Выключить напоминание'"""
+#     if await check_user_blocked(callback.from_user.id):
+#         await send_blocked_callback(callback)
+#         return
+#     
+#     user_id = callback.from_user.id
+#     
+#     # Обновляем настройки напоминаний
+#     result = await api_request("set_reminder_settings", {
+#         "user_id": user_id,
+#         "reminders_enabled": False
+#     })
+#     
+#     if result.get("status") == "success":
+#         await callback.message.answer(
+#             "🔕 **Напоминания выключены**\n\n"
+#             "Ты больше не будешь получать ежедневные сообщения поддержки.\n\n"
+#             "💡 _Ты всегда можешь включить их обратно в профиле_",
+#             parse_mode='Markdown'
+#         )
+#         logger.info(f"✅ Reminders disabled for user {user_id}")
+#     else:
+#         await callback.message.answer(
+#             "❌ Не удалось выключить напоминания. Попробуй позже."
+#         )
+#         logger.error(f"❌ Failed to disable reminders for user {user_id}")
+#     
+#     await callback.answer()
 
 
 
