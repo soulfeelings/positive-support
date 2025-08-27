@@ -15,16 +15,19 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Конфигурация бота
-ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN", "8233417802:AAGyzmvx1m7MdhGFN-Jk3tTjJ7Q_NgV16h8")
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN")
 
-# Список ID администраторов (добавьте свой Telegram ID)
-ADMIN_IDS = [
-    int(os.getenv("ADMIN_ID", "8166609254")),  # Основной админ из переменной окружения
-    # Можно добавить еще администраторов:
-    # 123456789,  # ID второго админа
-    # 987654321,  # ID третьего админа
-]
+BACKEND_URL = os.getenv("BACKEND_URL")
+
+if not ADMIN_BOT_TOKEN:
+    logger.error("ADMIN_BOT_TOKEN not set!")
+    exit(1)
+
+ADMIN_IDS = [int(os.getenv("ADMIN_ID"))]
+
+if not ADMIN_IDS:
+    logger.error("ADMIN_ID not set!")
+    exit(1)
 
 # Конфигурация БД
 DB_HOST = os.getenv("DB_HOST", "localhost")

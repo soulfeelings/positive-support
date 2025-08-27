@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 import aiohttp
+from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
@@ -9,15 +10,22 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
+# Загружаем переменные окружения из .env файла
+load_dotenv()
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8234250977:AAFSjY7Ci-xajOeB-JqRgWB2vTVtQaW9UCc")
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+BACKEND_URL = os.getenv("BACKEND_URL")
 
 if not BOT_TOKEN:
     logger.error("BOT_TOKEN not set!")
+    exit(1)
+
+if not BACKEND_URL:
+    logger.error("BACKEND_URL not set!")
     exit(1)
 
 logger.info(f"🤖 Bot starting with token: {BOT_TOKEN[:10]}...")
