@@ -1,6 +1,7 @@
 import requests
 
-BOT_TOKEN = "8234250977:AAFSjY7Ci-xajOeB-JqRgWB2vTVtQaW9UCc"
+load_dotenv()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 print("Очистка конфликтов бота...")
 
