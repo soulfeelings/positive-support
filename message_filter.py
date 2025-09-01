@@ -60,39 +60,47 @@ class MessageFilter:
         if not text or message_type != "text":
             return FilterResult(False, "", "", "pass")
         
+        logger.info(f"🔍 Проверяем сообщение пользователя {user_id}: '{text[:50]}...'")
+        
         # Сначала проверяем слова-исключения
         text_lower = text.lower()
         for exception_word in self.exception_words:
             if exception_word in text_lower:
+                logger.info(f"✅ Слово-исключение найдено: '{exception_word}'")
                 return FilterResult(False, "", "", "pass")
         
         # Проверяем на мат (если включено)
         if self.settings.get("enable_bad_words_check", True):
             mat_result = self._check_bad_words(text)
             if mat_result.is_blocked:
+                logger.warning(f"🚫 Мат обнаружен: {mat_result.details}")
                 return mat_result
         
         # Проверяем на оскорбления (если включено)
         if self.settings.get("enable_offensive_words_check", True):
             offensive_result = self._check_offensive_words(text)
             if offensive_result.is_blocked:
+                logger.warning(f"🚫 Оскорбление обнаружено: {offensive_result.details}")
                 return offensive_result
         
         # Проверяем на ссылки (если включено)
         if self.settings.get("enable_links_check", True):
             link_result = self._check_links(text)
             if link_result.is_blocked:
+                logger.warning(f"🚫 Ссылка обнаружена: {link_result.details}")
                 return link_result
         
         # Проверяем на спам (если включено)
         if self.settings.get("enable_spam_check", True):
             spam_result = self._check_spam(user_id, text)
             if spam_result.is_blocked:
+                logger.warning(f"🚫 Спам обнаружен: {spam_result.details}")
                 return spam_result
         
         # Обновляем счетчик сообщений пользователя
         self._update_user_message_count(user_id)
         
+        logger.info(f"✅ Сообщение прошло проверку")
         return FilterResult(False, "", "", "pass")
     
     def _check_bad_words(self, text: str) -> FilterResult:

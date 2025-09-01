@@ -15,7 +15,7 @@ from message_filter import get_message_filter, FilterResult
 load_dotenv()
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -107,6 +107,8 @@ async def send_blocked_message(message: types.Message):
 async def handle_filter_violation(message: types.Message, filter_result: FilterResult):
     """Обрабатывает нарушение фильтра сообщений"""
     user_id = message.from_user.id
+    
+    logger.info(f"🚫 Блокируем сообщение пользователя {user_id}: {filter_result.reason}")
     
     # Просто блокируем сообщение и показываем причину
     block_text = f"""🚫 **Сообщение заблокировано**
@@ -840,6 +842,13 @@ async def unknown(message: types.Message, state: FSMContext):
     if await check_user_blocked(message.from_user.id):
         await send_blocked_message(message)
         return
+    
+    # Проверяем все текстовые сообщения через фильтр
+    if message.text and message.text not in ["👤 Профиль", "💌 Отправить поддержку", "🔥 Получить поддержку", "🆘 Нужна помощь", "🤝 Помочь кому-нибудь"]:
+        filter_result = message_filter.check_message(message.from_user.id, message.text, "text")
+        if filter_result.is_blocked:
+            await handle_filter_violation(message, filter_result)
+            return
     
     await state.clear()
     await message.answer("🤔 Используй кнопки меню", reply_markup=main_kb)
