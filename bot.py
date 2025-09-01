@@ -9,6 +9,7 @@ from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMar
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from message_filter import get_message_filter, FilterResult
 
 # Загружаем переменные окружения из .env файла
 load_dotenv()
@@ -33,6 +34,9 @@ logger.info(f"🌐 Backend URL: {BACKEND_URL}")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
+
+# Инициализируем фильтр сообщений
+message_filter = get_message_filter()
 
 class UserStates(StatesGroup):
     waiting_nickname = State()
@@ -99,6 +103,26 @@ async def send_blocked_message(message: types.Message):
 • Неподобающим поведением"""
     
     await message.answer(blocked_text, parse_mode='Markdown')
+
+async def handle_filter_violation(message: types.Message, filter_result: FilterResult):
+    """Обрабатывает нарушение фильтра сообщений"""
+    user_id = message.from_user.id
+    
+    # Просто блокируем сообщение и показываем причину
+    block_text = f"""🚫 **Сообщение заблокировано**
+
+{filter_result.details}
+
+📝 **Правила сообщества:**
+• Запрещены нецензурные выражения
+• Запрещены оскорбления
+• Запрещены ссылки и реклама
+• Запрещен спам
+
+💡 _Сообщение не было отправлено_"""
+    
+    await message.answer(block_text, parse_mode='Markdown')
+    logger.warning(f"User {user_id} message blocked for {filter_result.reason}: {filter_result.details}")
 
 async def send_blocked_callback(callback: types.CallbackQuery):
     """Отправляет сообщение о блокировке для callback"""
@@ -193,6 +217,12 @@ async def handle_nickname(message: types.Message, state: FSMContext):
     
     nickname = message.text.strip()
 
+    # Проверяем никнейм через фильтр
+    filter_result = message_filter.check_message(message.from_user.id, nickname, "text")
+    if filter_result.is_blocked:
+        await handle_filter_violation(message, filter_result)
+        return
+
     if len(nickname) < 3 or len(nickname) > 20:
         await message.answer("❌ Никнейм должен быть 3-20 символов:")
         return
@@ -224,6 +254,12 @@ async def handle_nickname_change(message: types.Message, state: FSMContext):
         return
     
     nickname = message.text.strip()
+
+    # Проверяем никнейм через фильтр
+    filter_result = message_filter.check_message(message.from_user.id, nickname, "text")
+    if filter_result.is_blocked:
+        await handle_filter_violation(message, filter_result)
+        return
 
     if len(nickname) < 3 or len(nickname) > 20:
         await message.answer("❌ Никнейм должен быть 3-20 символов. Попробуй еще раз:")
@@ -314,6 +350,12 @@ async def handle_message(message: types.Message, state: FSMContext):
         if message.text in ["👤 Профиль", "💌 Отправить поддержку", "🔥 Получить поддержку", "🆘 Нужна помощь", "🤝 Помочь кому-нибудь"]:
             await state.clear()
             await message.answer("🤔 Используй кнопки меню", reply_markup=main_kb)
+            return
+        
+        # Проверяем сообщение через фильтр
+        filter_result = message_filter.check_message(message.from_user.id, message.text, "text")
+        if filter_result.is_blocked:
+            await handle_filter_violation(message, filter_result)
             return
             
         message_data = {
@@ -623,7 +665,13 @@ async def help_command(message: types.Message):
         "🔥 Получить поддержку - получить добрые слова\n"
         "🆘 Нужна помощь - попросить поддержку\n"
         "🤝 Помочь кому-нибудь - ответить на чей-то запрос помощи\n"
-        "👤 Профиль - посмотреть свою статистику и изменить никнейм",
+        "👤 Профиль - посмотреть свою статистику и изменить никнейм\n\n"
+        "🛡️ **Автофильтр:**\n"
+        "Бот автоматически проверяет все сообщения на:\n"
+        "• Нецензурные выражения (блокировка)\n"
+        "• Оскорбления (блокировка)\n"
+        "• Ссылки и рекламу (блокировка)\n"
+        "• Спам (блокировка)",
         parse_mode='Markdown'
     )
 
