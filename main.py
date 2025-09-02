@@ -65,6 +65,9 @@ class ReminderSettings(BaseModel):
     user_id: int
     reminders_enabled: bool
 
+class TopListQuery(BaseModel):
+    user_id: int
+
 # API эндпоинты
 @app.get("/")
 async def index():
@@ -564,6 +567,62 @@ async def get_users_with_reminders():
     except Exception as e:
         logger.error(f"Error getting users with reminders: {e}")
         return {"status": "error"}
+
+@app.post("/toplist")
+async def get_toplist(data: TopListQuery):
+    """Получение топ-10 пользователей по рейтингу"""
+    try:
+        conn = await get_connection()
+        
+        # Получаем топ-10 пользователей по рейтингу
+        top_users = await conn.fetch("""
+            SELECT u.nickname, r.rating, u.user_id
+            FROM ratings r
+            JOIN users u ON r.user_id = u.user_id
+            WHERE u.is_blocked = FALSE
+            ORDER BY r.rating DESC
+            LIMIT 10
+        """)
+        
+        # Получаем позицию текущего пользователя в рейтинге
+        user_position = await conn.fetchval("""
+            SELECT COUNT(*) + 1
+            FROM ratings r
+            JOIN users u ON r.user_id = u.user_id
+            WHERE u.is_blocked = FALSE AND r.rating > (
+                SELECT COALESCE(r2.rating, 0)
+                FROM ratings r2
+                WHERE r2.user_id = $1
+            )
+        """, data.user_id)
+        
+        # Получаем рейтинг текущего пользователя
+        user_rating = await conn.fetchval("""
+            SELECT COALESCE(rating, 0) FROM ratings WHERE user_id = $1
+        """, data.user_id)
+        
+        await conn.close()
+        
+        # Формируем список топ-10
+        toplist = []
+        for i, user in enumerate(top_users, 1):
+            toplist.append({
+                "position": i,
+                "nickname": user["nickname"],
+                "rating": user["rating"],
+                "user_id": user["user_id"]
+            })
+        
+        return {
+            "status": "ok",
+            "toplist": toplist,
+            "user_position": user_position,
+            "user_rating": user_rating
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting toplist: {e}")
+        return {"status": "error", "message": str(e)}
 
 @app.get("/health")
 async def health():
