@@ -898,13 +898,80 @@ async def handle_show_toplist(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     logger.info(f"Toplist button pressed by user {user_id}")
     
-    # Временно упрощаем - показываем простое сообщение как кнопка "Сменить никнейм"
-    await callback.message.answer(
-        "🏆 **Топ лист**\n\n"
-        "Функция временно в разработке.\n\n"
-        "💡 _Скоро здесь будет топ-10 пользователей!_",
-        parse_mode='Markdown'
-    )
+    # Получаем данные топ-листа через API с таймаутом
+    try:
+        result = await asyncio.wait_for(
+            api_request("toplist", {"user_id": user_id}),
+            timeout=10.0  # 10 секунд таймаут
+        )
+        logger.info(f"Toplist API result: {result}")
+        
+        if result.get("status") == "ok":
+            toplist = result.get("toplist", [])
+            user_position = result.get("user_position", 0)
+            user_rating = result.get("user_rating", 0)
+            
+            # Формируем сообщение с топ-листом
+            toplist_text = "🏆 **Топ лист лиги**\n\n"
+            
+            if toplist:
+                for user in toplist:
+                    position = user["position"]
+                    nickname = escape_markdown(user["nickname"])
+                    rating = user["rating"]
+                    
+                    # Добавляем эмодзи для первых трех мест
+                    if position == 1:
+                        position_emoji = "🥇"
+                    elif position == 2:
+                        position_emoji = "🥈"
+                    elif position == 3:
+                        position_emoji = "🥉"
+                    else:
+                        position_emoji = f"{position}."
+                    
+                    toplist_text += f"{position_emoji} **{nickname}** - {rating} ⭐\n"
+            else:
+                toplist_text += "_Пока никто не заработал рейтинг_\n"
+            
+            # Добавляем информацию о позиции пользователя
+            if user_position > 10:
+                toplist_text += f"\n📍 **Твое место:** {user_position} (рейтинг: {user_rating} ⭐)"
+            elif user_position <= 10 and user_rating > 0:
+                toplist_text += f"\n🎉 **Ты в топ-10!** (место: {user_position})"
+            else:
+                toplist_text += f"\n💪 **Твой рейтинг:** {user_rating} ⭐\n_Помогай людям, чтобы попасть в топ!_"
+            
+            await callback.message.answer(
+                toplist_text,
+                parse_mode='Markdown'
+            )
+        else:
+            # Если API вернул ошибку, показываем простое сообщение
+            await callback.message.answer(
+                "🏆 **Топ лист**\n\n"
+                "📊 Рейтинговая система в разработке.\n\n"
+                "💡 _Помогай людям, чтобы заработать рейтинг!_",
+                parse_mode='Markdown'
+            )
+    
+    except asyncio.TimeoutError:
+        logger.warning(f"Toplist API timeout for user {user_id}")
+        await callback.message.answer(
+            "🏆 **Топ лист**\n\n"
+            "⏰ Сервер временно недоступен.\n\n"
+            "💡 _Попробуй позже!_",
+            parse_mode='Markdown'
+        )
+    
+    except Exception as e:
+        logger.error(f"Toplist error for user {user_id}: {e}")
+        await callback.message.answer(
+            "🏆 **Топ лист**\n\n"
+            "📊 Рейтинговая система в разработке.\n\n"
+            "💡 _Помогай людям, чтобы заработать рейтинг!_",
+            parse_mode='Markdown'
+        )
     
     await callback.answer()
 
