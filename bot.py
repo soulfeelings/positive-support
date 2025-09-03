@@ -67,60 +67,33 @@ def get_help_inline_kb():
 # Inline клавиатура для профиля
 def get_profile_inline_kb():
     """Создает inline клавиатуру для профиля с кнопками смены никнейма и топ-листа"""
-    try:
-        # Создаем кнопки
-        nickname_button = InlineKeyboardButton(
-            text="✏️ Сменить никнейм", 
-            callback_data="change_nickname"
-        )
-        toplist_button = InlineKeyboardButton(
-            text="🏆 Топ лист", 
-            callback_data="show_toplist"
-        )
-        
-        # Создаем массив кнопок
-        buttons = [
-            [nickname_button],
-            [toplist_button]
-        ]
-        
-        logger.info(f"Creating profile inline keyboard with {len(buttons)} rows")
-        logger.info(f"Row 0: {nickname_button.text} -> {nickname_button.callback_data}")
-        logger.info(f"Row 1: {toplist_button.text} -> {toplist_button.callback_data}")
-        
-        # Создаем клавиатуру
-        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-        
-        # Проверяем, что клавиатура создана правильно
-        if not keyboard.inline_keyboard:
-            logger.error("Keyboard created but inline_keyboard is empty!")
-            raise Exception("Empty keyboard")
-        
-        if len(keyboard.inline_keyboard) != 2:
-            logger.error(f"Expected 2 rows, got {len(keyboard.inline_keyboard)}")
-            raise Exception(f"Wrong number of rows: {len(keyboard.inline_keyboard)}")
-        
-        logger.info(f"Keyboard created successfully with {len(keyboard.inline_keyboard)} rows")
-        return keyboard
-        
-    except Exception as e:
-        logger.error(f"Error creating profile keyboard: {e}")
-        logger.error("Creating fallback keyboard with only nickname button")
-        
-        # Fallback keyboard with just nickname button
-        try:
-            fallback_button = InlineKeyboardButton(
-                text="✏️ Сменить никнейм", 
-                callback_data="change_nickname"
-            )
-            fallback_buttons = [[fallback_button]]
-            fallback_keyboard = InlineKeyboardMarkup(inline_keyboard=fallback_buttons)
-            logger.info("Fallback keyboard created successfully")
-            return fallback_keyboard
-        except Exception as fallback_error:
-            logger.error(f"Error creating fallback keyboard: {fallback_error}")
-            # Return empty keyboard as last resort
-            return InlineKeyboardMarkup(inline_keyboard=[])
+    logger.info("=== Creating profile inline keyboard ===")
+    
+    # Создаем кнопки напрямую без промежуточных переменных
+    buttons = [
+        [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")],
+        [InlineKeyboardButton(text="🏆 Топ лист", callback_data="show_toplist")]
+    ]
+    
+    logger.info(f"Buttons array created with {len(buttons)} rows")
+    logger.info(f"Row 0: {buttons[0][0].text} -> {buttons[0][0].callback_data}")
+    logger.info(f"Row 1: {buttons[1][0].text} -> {buttons[1][0].callback_data}")
+    
+    # Создаем клавиатуру
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    
+    logger.info(f"Keyboard object created: {type(keyboard)}")
+    logger.info(f"Keyboard inline_keyboard: {keyboard.inline_keyboard}")
+    logger.info(f"Keyboard rows count: {len(keyboard.inline_keyboard)}")
+    
+    # Проверяем каждую строку
+    for i, row in enumerate(keyboard.inline_keyboard):
+        logger.info(f"Row {i}: {len(row)} buttons")
+        for j, button in enumerate(row):
+            logger.info(f"  Button {j}: '{button.text}' -> '{button.callback_data}'")
+    
+    logger.info("=== Profile keyboard creation completed ===")
+    return keyboard
 
 
 
@@ -371,9 +344,16 @@ async def need_help(message: types.Message, state: FSMContext):
 @dp.message(F.text == "👤 Профиль")
 async def handle_profile_button(message: types.Message, state: FSMContext):
     """Обработка кнопки Профиль с высоким приоритетом"""
-    logger.info(f"Profile button pressed by user {message.from_user.id}")
+    user_id = message.from_user.id
+    logger.info(f"=== PROFILE BUTTON PRESSED by user {user_id} ===")
+    logger.info(f"Current state: {await state.get_state()}")
+    logger.info(f"Current data: {await state.get_data()}")
+    
     await state.clear()  # Очищаем состояние
+    logger.info(f"State cleared for user {user_id}")
+    
     await show_profile(message, state)
+    logger.info(f"=== PROFILE SHOW COMPLETED for user {user_id} ===")
 
 @dp.message(F.text == "💌 Отправить поддержку")
 async def handle_send_support_button(message: types.Message, state: FSMContext):
@@ -713,19 +693,22 @@ async def show_profile(message: types.Message, state: FSMContext):
 🤝 Помогли людям: **{rating}**
 🚨 Жалобы на вас: **{complaints_count}**"""
         
+        logger.info(f"=== Sending profile for user {user_id} ===")
         keyboard = get_profile_inline_kb()
+        
         logger.info(f"Sending profile message with keyboard for user {user_id}")
-        logger.info(f"Keyboard buttons count: {len(keyboard.inline_keyboard)}")
-        for i, row in enumerate(keyboard.inline_keyboard):
-            for j, button in enumerate(row):
-                logger.info(f"Button [{i}][{j}]: {button.text} -> {button.callback_data}")
+        logger.info(f"Profile text length: {len(profile_text)} characters")
+        logger.info(f"Keyboard type: {type(keyboard)}")
+        logger.info(f"Keyboard has {len(keyboard.inline_keyboard)} rows")
         
         await message.answer(
             profile_text,
             parse_mode='Markdown',
             reply_markup=keyboard
         )
-        logger.info(f"Profile shown for user {user_id}: {nickname} with keyboard")
+        
+        logger.info(f"Profile message sent successfully for user {user_id}: {nickname}")
+        logger.info(f"=== Profile sending completed for user {user_id} ===")
     else:
         await message.answer(
             "❌ Не удалось загрузить профиль.\n"
@@ -908,64 +891,90 @@ async def handle_change_nickname(callback: types.CallbackQuery, state: FSMContex
 @dp.callback_query(F.data == "show_toplist")
 async def handle_show_toplist(callback: types.CallbackQuery, state: FSMContext):
     """Обработка кнопки 'Топ лист'"""
-    if await check_user_blocked(callback.from_user.id):
-        await send_blocked_callback(callback)
-        return
-    
-    user_id = callback.from_user.id
-    logger.info(f"Toplist button pressed by user {user_id}")
-    
-    # Получаем данные топ-листа через API
-    result = await api_request("toplist", {"user_id": user_id})
-    
-    if result.get("status") == "ok":
-        toplist = result.get("toplist", [])
-        user_position = result.get("user_position", 0)
-        user_rating = result.get("user_rating", 0)
+    try:
+        if await check_user_blocked(callback.from_user.id):
+            await send_blocked_callback(callback)
+            return
         
-        # Формируем сообщение с топ-листом
-        toplist_text = "🏆 **Топ лист лиги**\n\n"
+        user_id = callback.from_user.id
+        logger.info(f"Toplist button pressed by user {user_id}")
         
-        if toplist:
-            for user in toplist:
-                position = user["position"]
-                nickname = escape_markdown(user["nickname"])
-                rating = user["rating"]
-                
-                # Добавляем эмодзи для первых трех мест
-                if position == 1:
-                    position_emoji = "🥇"
-                elif position == 2:
-                    position_emoji = "🥈"
-                elif position == 3:
-                    position_emoji = "🥉"
-                else:
-                    position_emoji = f"{position}."
-                
-                toplist_text += f"{position_emoji} **{nickname}** - {rating} ⭐\n"
+        # Получаем данные топ-листа через API
+        result = await api_request("toplist", {"user_id": user_id})
+        logger.info(f"Toplist API result: {result}")
+        
+        if result.get("status") == "ok":
+            toplist = result.get("toplist", [])
+            user_position = result.get("user_position", 0)
+            user_rating = result.get("user_rating", 0)
+            
+            logger.info(f"Toplist data: {len(toplist)} users, user position: {user_position}, user rating: {user_rating}")
+            
+            # Формируем сообщение с топ-листом
+            toplist_text = "🏆 **Топ лист лиги**\n\n"
+            
+            if toplist:
+                for user in toplist:
+                    position = user["position"]
+                    nickname = escape_markdown(user["nickname"])
+                    rating = user["rating"]
+                    
+                    # Добавляем эмодзи для первых трех мест
+                    if position == 1:
+                        position_emoji = "🥇"
+                    elif position == 2:
+                        position_emoji = "🥈"
+                    elif position == 3:
+                        position_emoji = "🥉"
+                    else:
+                        position_emoji = f"{position}."
+                    
+                    toplist_text += f"{position_emoji} **{nickname}** - {rating} ⭐\n"
+            else:
+                toplist_text += "_Пока никто не заработал рейтинг_\n"
+            
+            # Добавляем информацию о позиции пользователя, если он не в топ-10
+            if user_position > 10:
+                toplist_text += f"\n📍 **Твое место:** {user_position} (рейтинг: {user_rating} ⭐)"
+            elif user_position <= 10 and user_rating > 0:
+                toplist_text += f"\n🎉 **Ты в топ-10!** (место: {user_position})"
+            else:
+                toplist_text += f"\n💪 **Твой рейтинг:** {user_rating} ⭐\n_Помогай людям, чтобы попасть в топ!_"
+            
+            logger.info(f"Sending toplist message to user {user_id}")
+            await callback.message.answer(
+                toplist_text,
+                parse_mode='Markdown'
+            )
+            logger.info(f"Toplist message sent successfully to user {user_id}")
         else:
-            toplist_text += "_Пока никто не заработал рейтинг_\n"
-        
-        # Добавляем информацию о позиции пользователя, если он не в топ-10
-        if user_position > 10:
-            toplist_text += f"\n📍 **Твое место:** {user_position} (рейтинг: {user_rating} ⭐)"
-        elif user_position <= 10 and user_rating > 0:
-            toplist_text += f"\n🎉 **Ты в топ-10!** (место: {user_position})"
-        else:
-            toplist_text += f"\n💪 **Твой рейтинг:** {user_rating} ⭐\n_Помогай людям, чтобы попасть в топ!_"
-        
-        await callback.message.answer(
-            toplist_text,
-            parse_mode='Markdown'
-        )
-    else:
-        await callback.message.answer(
-            "❌ **Ошибка**\n\n"
-            "Не удалось загрузить топ-лист. Попробуй позже.",
-            parse_mode='Markdown'
-        )
+            error_msg = result.get("message", "неизвестная ошибка")
+            logger.error(f"Toplist API error for user {user_id}: {error_msg}")
+            await callback.message.answer(
+                f"❌ **Ошибка**\n\n"
+                f"Не удалось загрузить топ-лист: {error_msg}\n\n"
+                f"Попробуй позже.",
+                parse_mode='Markdown'
+            )
     
-    await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in handle_show_toplist for user {callback.from_user.id}: {e}")
+        try:
+            await callback.message.answer(
+                "❌ **Ошибка**\n\n"
+                "Произошла ошибка при загрузке топ-листа. Попробуй позже.",
+                parse_mode='Markdown'
+            )
+        except Exception as send_error:
+            logger.error(f"Failed to send error message: {send_error}")
+    
+    finally:
+        # Гарантированно отвечаем на callback, чтобы кнопка не мигала
+        try:
+            await callback.answer()
+            logger.info(f"Callback answered for user {callback.from_user.id}")
+        except Exception as answer_error:
+            logger.error(f"Failed to answer callback: {answer_error}")
 
 
 
