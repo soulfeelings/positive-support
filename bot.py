@@ -69,62 +69,20 @@ def get_profile_inline_kb():
     """Создает inline клавиатуру для профиля с кнопками смены никнейма и топ-листа"""
     logger.info("=== Creating profile inline keyboard ===")
     
-    try:
-        # Создаем кнопки напрямую без промежуточных переменных
-        buttons = [
-            [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")],
-            [InlineKeyboardButton(text="🏆 Топ лист", callback_data="show_toplist")]
-        ]
-        
-        logger.info(f"Buttons array created with {len(buttons)} rows")
-        logger.info(f"Row 0: {buttons[0][0].text} -> {buttons[0][0].callback_data}")
-        logger.info(f"Row 1: {buttons[1][0].text} -> {buttons[1][0].callback_data}")
-        
-        # Создаем клавиатуру
-        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-        
-        logger.info(f"Keyboard object created: {type(keyboard)}")
-        logger.info(f"Keyboard inline_keyboard: {keyboard.inline_keyboard}")
-        logger.info(f"Keyboard rows count: {len(keyboard.inline_keyboard)}")
-        
-        # Проверяем каждую строку
-        for i, row in enumerate(keyboard.inline_keyboard):
-            logger.info(f"Row {i}: {len(row)} buttons")
-            for j, button in enumerate(row):
-                logger.info(f"  Button {j}: '{button.text}' -> '{button.callback_data}'")
-        
-        # Дополнительная проверка
-        if len(keyboard.inline_keyboard) != 2:
-            logger.error(f"ERROR: Expected 2 rows, got {len(keyboard.inline_keyboard)}")
-            raise Exception(f"Wrong number of rows: {len(keyboard.inline_keyboard)}")
-        
-        if len(keyboard.inline_keyboard[1]) != 1:
-            logger.error(f"ERROR: Expected 1 button in row 1, got {len(keyboard.inline_keyboard[1])}")
-            raise Exception(f"Wrong number of buttons in row 1: {len(keyboard.inline_keyboard[1])}")
-        
-        if keyboard.inline_keyboard[1][0].callback_data != "show_toplist":
-            logger.error(f"ERROR: Expected callback_data 'show_toplist', got '{keyboard.inline_keyboard[1][0].callback_data}'")
-            raise Exception(f"Wrong callback_data: {keyboard.inline_keyboard[1][0].callback_data}")
-        
-        logger.info("=== Profile keyboard creation completed successfully ===")
-        return keyboard
-        
-    except Exception as e:
-        logger.error(f"ERROR creating profile keyboard: {e}")
-        # Возвращаем минимальную клавиатуру с обеими кнопками
-        try:
-            fallback_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")],
-                [InlineKeyboardButton(text="🏆 Топ лист", callback_data="show_toplist")]
-            ])
-            logger.info("Fallback keyboard created successfully")
-            return fallback_keyboard
-        except Exception as fallback_error:
-            logger.error(f"ERROR creating fallback keyboard: {fallback_error}")
-            # Последний резерв - только кнопка никнейма
-            return InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")]
-            ])
+    # Простое создание клавиатуры без сложных проверок
+    buttons = [
+        [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")],
+        [InlineKeyboardButton(text="🏆 Топ лист", callback_data="show_toplist")]
+    ]
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    
+    logger.info(f"Keyboard created with {len(keyboard.inline_keyboard)} rows")
+    logger.info(f"Row 0: {keyboard.inline_keyboard[0][0].text}")
+    logger.info(f"Row 1: {keyboard.inline_keyboard[1][0].text}")
+    logger.info("=== Profile keyboard creation completed ===")
+    
+    return keyboard
 
 
 
@@ -371,9 +329,6 @@ async def need_help(message: types.Message, state: FSMContext):
     await state.set_state(UserStates.waiting_message)
     await state.update_data(action="help")
 
-# Словарь для отслеживания активных запросов профиля
-active_profile_requests = set()
-
 # Обработчики кнопок меню с высоким приоритетом (работают даже в состоянии waiting_message)
 @dp.message(F.text == "👤 Профиль")
 async def handle_profile_button(message: types.Message, state: FSMContext):
@@ -381,28 +336,11 @@ async def handle_profile_button(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     logger.info(f"=== PROFILE BUTTON PRESSED by user {user_id} ===")
     
-    # Защита от быстрых повторных нажатий
-    if user_id in active_profile_requests:
-        logger.info(f"Profile request already active for user {user_id}, ignoring")
-        return
+    await state.clear()  # Очищаем состояние
+    logger.info(f"State cleared for user {user_id}")
     
-    active_profile_requests.add(user_id)
-    logger.info(f"Added user {user_id} to active requests")
-    
-    try:
-        logger.info(f"Current state: {await state.get_state()}")
-        logger.info(f"Current data: {await state.get_data()}")
-        
-        await state.clear()  # Очищаем состояние
-        logger.info(f"State cleared for user {user_id}")
-        
-        await show_profile(message, state)
-        logger.info(f"=== PROFILE SHOW COMPLETED for user {user_id} ===")
-    
-    finally:
-        # Убираем пользователя из активных запросов
-        active_profile_requests.discard(user_id)
-        logger.info(f"Removed user {user_id} from active requests")
+    await show_profile(message, state)
+    logger.info(f"=== PROFILE SHOW COMPLETED for user {user_id} ===")
 
 @dp.message(F.text == "💌 Отправить поддержку")
 async def handle_send_support_button(message: types.Message, state: FSMContext):
