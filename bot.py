@@ -11,7 +11,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from message_filter import get_message_filter, FilterResult
 
-# Загружаем переменные окружения из .env файла
+
 load_dotenv()
 
 # Настройка логирования
