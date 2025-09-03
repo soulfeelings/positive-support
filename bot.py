@@ -66,13 +66,61 @@ def get_help_inline_kb():
 
 # Inline клавиатура для профиля
 def get_profile_inline_kb():
-    buttons = [
-        [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")],
-        [InlineKeyboardButton(text="🏆 Топ лист", callback_data="show_toplist")]
-    ]
-    
-    logger.info("Creating profile inline keyboard with toplist button")
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    """Создает inline клавиатуру для профиля с кнопками смены никнейма и топ-листа"""
+    try:
+        # Создаем кнопки
+        nickname_button = InlineKeyboardButton(
+            text="✏️ Сменить никнейм", 
+            callback_data="change_nickname"
+        )
+        toplist_button = InlineKeyboardButton(
+            text="🏆 Топ лист", 
+            callback_data="show_toplist"
+        )
+        
+        # Создаем массив кнопок
+        buttons = [
+            [nickname_button],
+            [toplist_button]
+        ]
+        
+        logger.info(f"Creating profile inline keyboard with {len(buttons)} rows")
+        logger.info(f"Row 0: {nickname_button.text} -> {nickname_button.callback_data}")
+        logger.info(f"Row 1: {toplist_button.text} -> {toplist_button.callback_data}")
+        
+        # Создаем клавиатуру
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        # Проверяем, что клавиатура создана правильно
+        if not keyboard.inline_keyboard:
+            logger.error("Keyboard created but inline_keyboard is empty!")
+            raise Exception("Empty keyboard")
+        
+        if len(keyboard.inline_keyboard) != 2:
+            logger.error(f"Expected 2 rows, got {len(keyboard.inline_keyboard)}")
+            raise Exception(f"Wrong number of rows: {len(keyboard.inline_keyboard)}")
+        
+        logger.info(f"Keyboard created successfully with {len(keyboard.inline_keyboard)} rows")
+        return keyboard
+        
+    except Exception as e:
+        logger.error(f"Error creating profile keyboard: {e}")
+        logger.error("Creating fallback keyboard with only nickname button")
+        
+        # Fallback keyboard with just nickname button
+        try:
+            fallback_button = InlineKeyboardButton(
+                text="✏️ Сменить никнейм", 
+                callback_data="change_nickname"
+            )
+            fallback_buttons = [[fallback_button]]
+            fallback_keyboard = InlineKeyboardMarkup(inline_keyboard=fallback_buttons)
+            logger.info("Fallback keyboard created successfully")
+            return fallback_keyboard
+        except Exception as fallback_error:
+            logger.error(f"Error creating fallback keyboard: {fallback_error}")
+            # Return empty keyboard as last resort
+            return InlineKeyboardMarkup(inline_keyboard=[])
 
 
 
@@ -665,12 +713,19 @@ async def show_profile(message: types.Message, state: FSMContext):
 🤝 Помогли людям: **{rating}**
 🚨 Жалобы на вас: **{complaints_count}**"""
         
+        keyboard = get_profile_inline_kb()
+        logger.info(f"Sending profile message with keyboard for user {user_id}")
+        logger.info(f"Keyboard buttons count: {len(keyboard.inline_keyboard)}")
+        for i, row in enumerate(keyboard.inline_keyboard):
+            for j, button in enumerate(row):
+                logger.info(f"Button [{i}][{j}]: {button.text} -> {button.callback_data}")
+        
         await message.answer(
             profile_text,
             parse_mode='Markdown',
-            reply_markup=get_profile_inline_kb()
+            reply_markup=keyboard
         )
-        logger.info(f"Profile shown for user {user_id}: {nickname}")
+        logger.info(f"Profile shown for user {user_id}: {nickname} with keyboard")
     else:
         await message.answer(
             "❌ Не удалось загрузить профиль.\n"
@@ -840,6 +895,7 @@ async def handle_change_nickname(callback: types.CallbackQuery, state: FSMContex
         await send_blocked_callback(callback)
         return
     
+    # Отправляем новое сообщение для смены никнейма, не редактируя профиль
     await callback.message.answer(
         "✏️ **Смена никнейма**\n\n"
         "Введи новый никнейм (3-20 символов):\n\n"
@@ -857,6 +913,7 @@ async def handle_show_toplist(callback: types.CallbackQuery, state: FSMContext):
         return
     
     user_id = callback.from_user.id
+    logger.info(f"Toplist button pressed by user {user_id}")
     
     # Получаем данные топ-листа через API
     result = await api_request("toplist", {"user_id": user_id})
