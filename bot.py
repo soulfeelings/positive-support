@@ -66,34 +66,12 @@ def get_help_inline_kb():
 
 # Inline клавиатура для профиля
 def get_profile_inline_kb():
-    """Создает inline клавиатуру для профиля с кнопками смены никнейма и топ-листа"""
-    logger.info("=== Creating profile inline keyboard ===")
-    
-    # Создаем кнопки напрямую без промежуточных переменных
     buttons = [
         [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")],
         [InlineKeyboardButton(text="🏆 Топ лист", callback_data="show_toplist")]
     ]
     
-    logger.info(f"Buttons array created with {len(buttons)} rows")
-    logger.info(f"Row 0: {buttons[0][0].text} -> {buttons[0][0].callback_data}")
-    logger.info(f"Row 1: {buttons[1][0].text} -> {buttons[1][0].callback_data}")
-    
-    # Создаем клавиатуру
-    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-    
-    logger.info(f"Keyboard object created: {type(keyboard)}")
-    logger.info(f"Keyboard inline_keyboard: {keyboard.inline_keyboard}")
-    logger.info(f"Keyboard rows count: {len(keyboard.inline_keyboard)}")
-    
-    # Проверяем каждую строку
-    for i, row in enumerate(keyboard.inline_keyboard):
-        logger.info(f"Row {i}: {len(row)} buttons")
-        for j, button in enumerate(row):
-            logger.info(f"  Button {j}: '{button.text}' -> '{button.callback_data}'")
-    
-    logger.info("=== Profile keyboard creation completed ===")
-    return keyboard
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 
@@ -344,16 +322,8 @@ async def need_help(message: types.Message, state: FSMContext):
 @dp.message(F.text == "👤 Профиль")
 async def handle_profile_button(message: types.Message, state: FSMContext):
     """Обработка кнопки Профиль с высоким приоритетом"""
-    user_id = message.from_user.id
-    logger.info(f"=== PROFILE BUTTON PRESSED by user {user_id} ===")
-    logger.info(f"Current state: {await state.get_state()}")
-    logger.info(f"Current data: {await state.get_data()}")
-    
     await state.clear()  # Очищаем состояние
-    logger.info(f"State cleared for user {user_id}")
-    
     await show_profile(message, state)
-    logger.info(f"=== PROFILE SHOW COMPLETED for user {user_id} ===")
 
 @dp.message(F.text == "💌 Отправить поддержку")
 async def handle_send_support_button(message: types.Message, state: FSMContext):
@@ -693,22 +663,11 @@ async def show_profile(message: types.Message, state: FSMContext):
 🤝 Помогли людям: **{rating}**
 🚨 Жалобы на вас: **{complaints_count}**"""
         
-        logger.info(f"=== Sending profile for user {user_id} ===")
-        keyboard = get_profile_inline_kb()
-        
-        logger.info(f"Sending profile message with keyboard for user {user_id}")
-        logger.info(f"Profile text length: {len(profile_text)} characters")
-        logger.info(f"Keyboard type: {type(keyboard)}")
-        logger.info(f"Keyboard has {len(keyboard.inline_keyboard)} rows")
-        
         await message.answer(
             profile_text,
             parse_mode='Markdown',
-            reply_markup=keyboard
+            reply_markup=get_profile_inline_kb()
         )
-        
-        logger.info(f"Profile message sent successfully for user {user_id}: {nickname}")
-        logger.info(f"=== Profile sending completed for user {user_id} ===")
     else:
         await message.answer(
             "❌ Не удалось загрузить профиль.\n"
