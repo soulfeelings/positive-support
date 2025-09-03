@@ -71,6 +71,7 @@ def get_profile_inline_kb():
         [InlineKeyboardButton(text="🏆 Топ лист", callback_data="show_toplist")]
     ]
     
+    logger.info("Creating profile inline keyboard with toplist button")
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -293,7 +294,6 @@ async def handle_nickname_change(message: types.Message, state: FSMContext):
         else:
             await message.answer(f"❌ Ошибка: {error_msg}. Попробуй другой никнейм:")
 
-@dp.message(F.text == "💌 Отправить поддержку")
 async def send_support(message: types.Message, state: FSMContext):
     """Отправить поддержку"""
     if await check_user_blocked(message.from_user.id):
@@ -305,7 +305,6 @@ async def send_support(message: types.Message, state: FSMContext):
     await state.set_state(UserStates.waiting_message)
     await state.update_data(action="support")
 
-@dp.message(F.text == "🆘 Нужна помощь")
 async def need_help(message: types.Message, state: FSMContext):
     """Запросить помощь"""
     if await check_user_blocked(message.from_user.id):
@@ -319,6 +318,38 @@ async def need_help(message: types.Message, state: FSMContext):
     )
     await state.set_state(UserStates.waiting_message)
     await state.update_data(action="help")
+
+# Обработчики кнопок меню с высоким приоритетом (работают даже в состоянии waiting_message)
+@dp.message(F.text == "👤 Профиль")
+async def handle_profile_button(message: types.Message, state: FSMContext):
+    """Обработка кнопки Профиль с высоким приоритетом"""
+    logger.info(f"Profile button pressed by user {message.from_user.id}")
+    await state.clear()  # Очищаем состояние
+    await show_profile(message, state)
+
+@dp.message(F.text == "💌 Отправить поддержку")
+async def handle_send_support_button(message: types.Message, state: FSMContext):
+    """Обработка кнопки Отправить поддержку с высоким приоритетом"""
+    await state.clear()  # Очищаем состояние
+    await send_support(message, state)
+
+@dp.message(F.text == "🔥 Получить поддержку")
+async def handle_get_support_button(message: types.Message, state: FSMContext):
+    """Обработка кнопки Получить поддержку с высоким приоритетом"""
+    await state.clear()  # Очищаем состояние
+    await get_support(message, state)
+
+@dp.message(F.text == "🆘 Нужна помощь")
+async def handle_need_help_button(message: types.Message, state: FSMContext):
+    """Обработка кнопки Нужна помощь с высоким приоритетом"""
+    await state.clear()  # Очищаем состояние
+    await need_help(message, state)
+
+@dp.message(F.text == "🤝 Помочь кому-нибудь")
+async def handle_help_someone_button(message: types.Message, state: FSMContext):
+    """Обработка кнопки Помочь кому-нибудь с высоким приоритетом"""
+    await state.clear()  # Очищаем состояние
+    await help_someone(message, state)
 
 @dp.message(UserStates.waiting_message)
 async def handle_message(message: types.Message, state: FSMContext):
@@ -349,12 +380,6 @@ async def handle_message(message: types.Message, state: FSMContext):
         }
         content_description = "видео кружок"
     elif message.text:
-        # Проверяем что это не команда кнопки меню
-        if message.text in ["👤 Профиль", "💌 Отправить поддержку", "🔥 Получить поддержку", "🆘 Нужна помощь", "🤝 Помочь кому-нибудь"]:
-            await state.clear()
-            await message.answer("🤔 Используй кнопки меню", reply_markup=main_kb)
-            return
-        
         # Проверяем сообщение через фильтр
         filter_result = message_filter.check_message(message.from_user.id, message.text, "text")
         if filter_result.is_blocked:
@@ -466,7 +491,6 @@ async def handle_message(message: types.Message, state: FSMContext):
     
     await state.clear()
 
-@dp.message(F.text == "🔥 Получить поддержку")
 async def get_support(message: types.Message, state: FSMContext):
     """Получить поддержку"""
     if await check_user_blocked(message.from_user.id):
@@ -481,7 +505,6 @@ async def get_support(message: types.Message, state: FSMContext):
     else:
         await message.answer("😔 Пока нет сообщений поддержки")
 
-@dp.message(F.text == "🤝 Помочь кому-нибудь")
 async def help_someone(message: types.Message, state: FSMContext):
     """Показать запрос помощи (начинаем сначала)"""
     if await check_user_blocked(message.from_user.id):
@@ -584,7 +607,6 @@ async def show_help_request_simple(message: types.Message, state: FSMContext):
             reply_markup=main_kb
         )
 
-@dp.message(F.text == "👤 Профиль")
 async def show_profile(message: types.Message, state: FSMContext):
     """Показать профиль пользователя"""
     if await check_user_blocked(message.from_user.id):
@@ -595,6 +617,7 @@ async def show_profile(message: types.Message, state: FSMContext):
     await state.clear()
     
     user_id = message.from_user.id
+    logger.info(f"Showing profile for user {user_id}")
     
     # Получаем профиль пользователя
     profile = await api_request("profile", {"user_id": user_id})
@@ -906,7 +929,7 @@ async def unknown(message: types.Message, state: FSMContext):
         return
     
     # Проверяем все текстовые сообщения через фильтр
-    if message.text and message.text not in ["👤 Профиль", "💌 Отправить поддержку", "🔥 Получить поддержку", "🆘 Нужна помощь", "🤝 Помочь кому-нибудь"]:
+    if message.text:
         filter_result = message_filter.check_message(message.from_user.id, message.text, "text")
         if filter_result.is_blocked:
             await handle_filter_violation(message, filter_result)
