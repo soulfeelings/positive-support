@@ -891,90 +891,22 @@ async def handle_change_nickname(callback: types.CallbackQuery, state: FSMContex
 @dp.callback_query(F.data == "show_toplist")
 async def handle_show_toplist(callback: types.CallbackQuery, state: FSMContext):
     """Обработка кнопки 'Топ лист'"""
-    try:
-        if await check_user_blocked(callback.from_user.id):
-            await send_blocked_callback(callback)
-            return
-        
-        user_id = callback.from_user.id
-        logger.info(f"Toplist button pressed by user {user_id}")
-        
-        # Получаем данные топ-листа через API
-        result = await api_request("toplist", {"user_id": user_id})
-        logger.info(f"Toplist API result: {result}")
-        
-        if result.get("status") == "ok":
-            toplist = result.get("toplist", [])
-            user_position = result.get("user_position", 0)
-            user_rating = result.get("user_rating", 0)
-            
-            logger.info(f"Toplist data: {len(toplist)} users, user position: {user_position}, user rating: {user_rating}")
-            
-            # Формируем сообщение с топ-листом
-            toplist_text = "🏆 **Топ лист лиги**\n\n"
-            
-            if toplist:
-                for user in toplist:
-                    position = user["position"]
-                    nickname = escape_markdown(user["nickname"])
-                    rating = user["rating"]
-                    
-                    # Добавляем эмодзи для первых трех мест
-                    if position == 1:
-                        position_emoji = "🥇"
-                    elif position == 2:
-                        position_emoji = "🥈"
-                    elif position == 3:
-                        position_emoji = "🥉"
-                    else:
-                        position_emoji = f"{position}."
-                    
-                    toplist_text += f"{position_emoji} **{nickname}** - {rating} ⭐\n"
-            else:
-                toplist_text += "_Пока никто не заработал рейтинг_\n"
-            
-            # Добавляем информацию о позиции пользователя, если он не в топ-10
-            if user_position > 10:
-                toplist_text += f"\n📍 **Твое место:** {user_position} (рейтинг: {user_rating} ⭐)"
-            elif user_position <= 10 and user_rating > 0:
-                toplist_text += f"\n🎉 **Ты в топ-10!** (место: {user_position})"
-            else:
-                toplist_text += f"\n💪 **Твой рейтинг:** {user_rating} ⭐\n_Помогай людям, чтобы попасть в топ!_"
-            
-            logger.info(f"Sending toplist message to user {user_id}")
-            await callback.message.answer(
-                toplist_text,
-                parse_mode='Markdown'
-            )
-            logger.info(f"Toplist message sent successfully to user {user_id}")
-        else:
-            error_msg = result.get("message", "неизвестная ошибка")
-            logger.error(f"Toplist API error for user {user_id}: {error_msg}")
-            await callback.message.answer(
-                f"❌ **Ошибка**\n\n"
-                f"Не удалось загрузить топ-лист: {error_msg}\n\n"
-                f"Попробуй позже.",
-                parse_mode='Markdown'
-            )
+    if await check_user_blocked(callback.from_user.id):
+        await send_blocked_callback(callback)
+        return
     
-    except Exception as e:
-        logger.error(f"Error in handle_show_toplist for user {callback.from_user.id}: {e}")
-        try:
-            await callback.message.answer(
-                "❌ **Ошибка**\n\n"
-                "Произошла ошибка при загрузке топ-листа. Попробуй позже.",
-                parse_mode='Markdown'
-            )
-        except Exception as send_error:
-            logger.error(f"Failed to send error message: {send_error}")
+    user_id = callback.from_user.id
+    logger.info(f"Toplist button pressed by user {user_id}")
     
-    finally:
-        # Гарантированно отвечаем на callback, чтобы кнопка не мигала
-        try:
-            await callback.answer()
-            logger.info(f"Callback answered for user {callback.from_user.id}")
-        except Exception as answer_error:
-            logger.error(f"Failed to answer callback: {answer_error}")
+    # Временно упрощаем - показываем простое сообщение как кнопка "Сменить никнейм"
+    await callback.message.answer(
+        "🏆 **Топ лист**\n\n"
+        "Функция временно в разработке.\n\n"
+        "💡 _Скоро здесь будет топ-10 пользователей!_",
+        parse_mode='Markdown'
+    )
+    
+    await callback.answer()
 
 
 
