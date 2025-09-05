@@ -49,9 +49,6 @@ class MessageFilter:
         # Настройки из конфигурации
         self.max_messages_per_minute = self.settings["max_messages_per_minute"]
         
-        # Запускаем задачу очистки счетчиков
-        self._start_cleanup_task()
-        
     def check_message(self, user_id: int, text: str, message_type: str = "text") -> FilterResult:
         """
         Проверяет сообщение на все типы нарушений
@@ -179,18 +176,62 @@ class MessageFilter:
                 )
         
         # Проверяем частоту сообщений
-        if self._is_user_spamming(user_id):
+        spam_check = self._check_spam_frequency(user_id)
+        if spam_check["is_spamming"]:
             return FilterResult(
                 is_blocked=True,
                 reason="spam_frequency",
-                details="Слишком много сообщений за короткое время",
+                details=spam_check["message"],
                 severity="block"
             )
         
         return FilterResult(False, "", "", "pass")
     
+    def _check_spam_frequency(self, user_id: int) -> dict:
+        """Проверяет частоту сообщений и возвращает детальную информацию"""
+        import time
+        current_time = time.time()
+        
+        # Проверяем, прошла ли минута с последнего сообщения
+        last_message_time = self.user_last_message_time.get(user_id, 0)
+        if current_time - last_message_time >= 60:  # 60 секунд = 1 минута
+            # Сбрасываем счетчик, если прошла минута
+            self.user_message_count[user_id] = 0
+            self.user_last_message_time[user_id] = current_time
+            return {"is_spamming": False, "message": ""}
+        
+        current_count = self.user_message_count.get(user_id, 0)
+        if current_count >= self.max_messages_per_minute:
+            # Вычисляем оставшееся время
+            time_remaining = 60 - (current_time - last_message_time)
+            minutes = int(time_remaining // 60)
+            seconds = int(time_remaining % 60)
+            
+            if minutes > 0:
+                time_str = f"{minutes}м {seconds}с"
+            else:
+                time_str = f"{seconds}с"
+            
+            return {
+                "is_spamming": True,
+                "message": f"Слишком много сообщений за короткое время. Попробуйте через {time_str}"
+            }
+        
+        return {"is_spamming": False, "message": ""}
+    
     def _is_user_spamming(self, user_id: int) -> bool:
         """Проверяет, не спамит ли пользователь"""
+        import time
+        current_time = time.time()
+        
+        # Проверяем, прошла ли минута с последнего сообщения
+        last_message_time = self.user_last_message_time.get(user_id, 0)
+        if current_time - last_message_time >= 60:  # 60 секунд = 1 минута
+            # Сбрасываем счетчик, если прошла минута
+            self.user_message_count[user_id] = 0
+            self.user_last_message_time[user_id] = current_time
+            return False
+        
         current_count = self.user_message_count.get(user_id, 0)
         return current_count >= self.max_messages_per_minute
     
