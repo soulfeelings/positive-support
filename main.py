@@ -267,6 +267,16 @@ async def get_help_request(data: HelpRequestQuery):
     try:
         conn = await get_connection()
         
+        # Логируем запрос для отладки
+        logger.info(f"Getting help request for user {data.user_id}, last_seen_id: {data.last_seen_id}")
+        
+        # Проверим, есть ли вообще запросы помощи в базе
+        total_requests = await conn.fetchval("SELECT COUNT(*) FROM messages WHERE type = 'request'")
+        user_requests = await conn.fetchval("SELECT COUNT(*) FROM messages WHERE type = 'request' AND user_id = $1", data.user_id)
+        other_requests = await conn.fetchval("SELECT COUNT(*) FROM messages WHERE type = 'request' AND user_id != $1", data.user_id)
+        
+        logger.info(f"Total requests: {total_requests}, user's requests: {user_requests}, other users' requests: {other_requests}")
+        
         # Сначала пытаемся найти сообщение с id > last_seen_id
         request = await conn.fetchrow("""
             SELECT m.id, m.text, m.file_id, m.message_type, u.nickname, m.user_id 
@@ -292,7 +302,12 @@ async def get_help_request(data: HelpRequestQuery):
         await conn.close()
         
         if request:
-            logger.info(f"Showing help request id={request['id']} to user {data.user_id}, last_seen_id was {data.last_seen_id}")
+            # Дополнительная проверка на всякий случай
+            if request["user_id"] == data.user_id:
+                logger.error(f"ERROR: Found own message for user {data.user_id}, message_id: {request['id']}")
+                return {"status": "no_requests"}
+                
+            logger.info(f"Showing help request id={request['id']} from user {request['user_id']} to user {data.user_id}, last_seen_id was {data.last_seen_id}")
             return {
                 "status": "ok",
                 "request": {
@@ -498,6 +513,9 @@ async def get_reminder_message(data: ReminderMessageQuery):
     try:
         conn = await get_connection()
         
+        # Логируем запрос для отладки
+        logger.info(f"Getting reminder message for user {data.user_id}, last_seen_id: {data.last_seen_id}")
+        
         # Сначала пытаемся найти сообщение с id > last_seen_id
         message = await conn.fetchrow("""
             SELECT m.id, m.text, m.file_id, m.message_type, u.nickname, m.user_id 
@@ -523,7 +541,12 @@ async def get_reminder_message(data: ReminderMessageQuery):
         await conn.close()
         
         if message:
-            logger.info(f"Reminder message found for user {data.user_id}: message_id={message['id']}")
+            # Дополнительная проверка на всякий случай
+            if message["user_id"] == data.user_id:
+                logger.error(f"ERROR: Found own support message for user {data.user_id}, message_id: {message['id']}")
+                return {"status": "no_messages"}
+                
+            logger.info(f"Reminder message found for user {data.user_id}: message_id={message['id']} from user {message['user_id']}")
             return {
                 "status": "ok",
                 "message": {

@@ -603,8 +603,18 @@ async def show_help_request_simple(message: types.Message, state: FSMContext):
     if result.get("status") == "ok":
         request_data = result["request"]
         
+        # Дополнительная проверка - убеждаемся, что это не наше собственное сообщение
+        if request_data.get("user_id") == message.from_user.id:
+            logger.error(f"ERROR: Bot showing own message to user {message.from_user.id}, message_id: {request_data['id']}")
+            await message.answer(
+                "😔 Пока нет новых запросов помощи!\n\n"
+                "✨ Проверь позже.",
+                reply_markup=main_kb
+            )
+            return
+        
         # Сохраняем данные запроса и обновляем last_seen_id в состоянии
-        logger.info(f"Showing help request id={request_data['id']} to user {message.from_user.id}, updating last_seen_help_id")
+        logger.info(f"Showing help request id={request_data['id']} from user {request_data['user_id']} to user {message.from_user.id}, updating last_seen_help_id")
         await state.update_data(
             current_request=request_data,
             last_seen_help_id=request_data["id"]
