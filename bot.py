@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from message_filter import get_message_filter, FilterResult
+from achievements import AchievementSystem
 
 
 load_dotenv()
@@ -48,7 +49,8 @@ class UserStates(StatesGroup):
 main_kb = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text="💌 Отправить поддержку"), KeyboardButton(text="🔥 Получить поддержку")],
     [KeyboardButton(text="🆘 Нужна помощь"), KeyboardButton(text="🤝 Помочь кому-нибудь")],
-    [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="🏆 Топлист")]
+    [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="🏆 Топлист")],
+    [KeyboardButton(text="🎖️ Достижения")]
 ], resize_keyboard=True)
 
 # Inline клавиатура для запросов помощи
@@ -152,6 +154,47 @@ async def api_request(endpoint: str, data: dict):
         logger.error(f"API error for {endpoint}: {e}")
         return {"status": "error", "message": str(e)}
 
+async def check_user_achievements(user_id: int, action: str, **kwargs):
+    """Проверить и выдать достижения пользователю"""
+    try:
+        result = await api_request("check_achievements", {
+            "user_id": user_id,
+            "action": action,
+            "data": kwargs
+        })
+        
+        if result.get("status") == "success" and result.get("new_achievements"):
+            return result["new_achievements"]
+        return []
+    except Exception as e:
+        logger.error(f"Error checking achievements for user {user_id}: {e}")
+        return []
+
+async def get_user_achievements(user_id: int):
+    """Получить достижения пользователя"""
+    try:
+        result = await api_request("get_user_achievements", {"user_id": user_id})
+        if result.get("status") == "success":
+            return result.get("achievements", []), result.get("stats", {})
+        return [], {}
+    except Exception as e:
+        logger.error(f"Error getting achievements for user {user_id}: {e}")
+        return [], {}
+
+
+async def send_achievement_notification(message: types.Message, achievements: list):
+    """Отправить уведомление о новых достижениях"""
+    if not achievements:
+        return
+        
+    for achievement in achievements:
+        notification_text = f"""🏆 **Новое достижение!**
+
+{achievement['icon']} **{achievement['name']}**
+{achievement['description']}"""
+        
+        await message.answer(notification_text, parse_mode='Markdown')
+
 @dp.message(Command("start"))
 async def start(message: types.Message, state: FSMContext):
     """Команда старт"""
@@ -168,6 +211,12 @@ async def start(message: types.Message, state: FSMContext):
     
     if profile.get("status") == "ok" and profile.get("nickname"):
         nickname = profile.get('nickname')
+        
+        # Проверяем достижения при входе
+        new_achievements = await check_user_achievements(user_id, "registration")
+        if new_achievements:
+            await send_achievement_notification(message, new_achievements)
+        
         welcome_text = f"""👋 **Добро пожаловать в бот поддержки, {escape_markdown(nickname)}!**
 
 🤝 **Что умеет этот бот:**
@@ -176,6 +225,7 @@ async def start(message: types.Message, state: FSMContext):
 • 🆘 Просить помощи в трудные моменты
 • 🤝 Помогать тем, кому нужна поддержка
 • ⭐ Зарабатывать рейтинг за помощь другим
+• 🏆 Получать достижения за активность
 
 💝 **Здесь ты найдешь:**
 • Добрые слова и поддержку
@@ -354,6 +404,12 @@ async def handle_help_someone_button(message: types.Message, state: FSMContext):
     await state.clear()  # Очищаем состояние
     await help_someone(message, state)
 
+@dp.message(F.text == "🎖️ Достижения")
+async def handle_achievements_button(message: types.Message, state: FSMContext):
+    """Обработка кнопки Достижения с высоким приоритетом"""
+    await state.clear()  # Очищаем состояние
+    await show_achievements(message, state)
+
 @dp.message(UserStates.waiting_message)
 async def handle_message(message: types.Message, state: FSMContext):
     """Обработка текстовых, голосовых сообщений и видео кружков"""
@@ -453,6 +509,14 @@ async def handle_message(message: types.Message, state: FSMContext):
                     if rating_result.get("status") == "success":
                         new_rating = rating_result.get("new_rating", 0)
                         logger.info(f"Rating incremented for user {message.from_user.id}, new rating: {new_rating}")
+                        
+                        # Проверяем достижения за помощь и рейтинг
+                        help_achievements = await check_user_achievements(message.from_user.id, "help_given")
+                        rating_achievements = await check_user_achievements(message.from_user.id, "rating_reached", rating=new_rating)
+                        
+                        all_achievements = help_achievements + rating_achievements
+                        if all_achievements:
+                            await send_achievement_notification(message, all_achievements)
                     else:
                         logger.warning(f"Failed to increment rating for user {message.from_user.id}")
                     
@@ -476,6 +540,11 @@ async def handle_message(message: types.Message, state: FSMContext):
             result = await api_request("send_support", message_data)
             if result.get("status") == "success":
                 await message.answer(f"✅ {content_description.capitalize()} поддержки отправлено!", reply_markup=main_kb)
+                
+                # Проверяем достижения за отправку сообщений
+                new_achievements = await check_user_achievements(user_id, "messages_sent")
+                if new_achievements:
+                    await send_achievement_notification(message, new_achievements)
             else:
                 await message.answer("❌ Ошибка отправки", reply_markup=main_kb)
     
@@ -657,6 +726,10 @@ async def show_profile(message: types.Message, state: FSMContext):
             status_icon = "🚫"
             status_text = "_критическая репутация_"
         
+        # Получаем информацию о достижениях
+        achievements, achievement_stats = await get_user_achievements(user_id)
+        total_achievements = len(achievements)
+        
         profile_text = f"""👤 **Твой профиль**
 
 📛 Никнейм: **{safe_nickname}**
@@ -666,7 +739,10 @@ async def show_profile(message: types.Message, state: FSMContext):
 
 💌 Отправлено сообщений: _временно не доступно_
 🤝 Помогли людям: **{rating}**
-🚨 Жалобы на вас: **{complaints_count}**"""
+🚨 Жалобы на вас: **{complaints_count}**
+
+🎖️ **Достижения:**
+🏆 Всего: **{total_achievements}**"""
         
         await message.answer(
             profile_text,
@@ -951,6 +1027,60 @@ async def show_toplist(message: types.Message, state: FSMContext):
 
 
 
+
+async def show_achievements(message: types.Message, state: FSMContext):
+    """Показать достижения пользователя"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
+        return
+    
+    user_id = message.from_user.id
+    logger.info(f"Showing achievements for user {user_id}")
+    
+    # Получаем достижения пользователя
+    achievements, stats = await get_user_achievements(user_id)
+    
+    if not achievements:
+        await message.answer(
+            "🎖️ **Достижения**\n\n"
+            "📭 У вас пока нет достижений\n\n"
+            "💡 **Как получить достижения:**\n"
+            "• Помогайте другим людям\n"
+            "• Отправляйте сообщения поддержки\n"
+            "• Поднимайте свой рейтинг\n\n"
+            "🏆 Достижения появляются автоматически!",
+            parse_mode='Markdown',
+            reply_markup=main_kb
+        )
+        return
+    
+    # Формируем сообщение с достижениями
+    achievements_text = f"🎖️ **Ваши достижения**\n\n"
+    achievements_text += f"🏆 **Всего достижений:** {len(achievements)}\n\n"
+    
+    # Показываем достижения
+    for achievement in achievements:
+        earned_date = achievement.get('earned_at', '')
+        if earned_date:
+            if isinstance(earned_date, str):
+                earned_date = earned_date[:10]  # Берем только дату
+            else:
+                earned_date = earned_date.strftime("%d.%m.%Y")
+        
+        achievements_text += f"✅ {achievement['icon']} **{achievement['name']}**\n"
+        achievements_text += f"   _{achievement['description']}_\n"
+        if earned_date:
+            achievements_text += f"   📅 {earned_date}\n"
+        achievements_text += "\n"
+    
+    # Добавляем информацию о прогрессе
+    achievements_text += "💡 **Продолжайте помогать другим, чтобы получить больше достижений!**"
+    
+    await message.answer(
+        achievements_text,
+        parse_mode='Markdown',
+        reply_markup=main_kb
+    )
 
 @dp.message()
 async def unknown(message: types.Message, state: FSMContext):
