@@ -48,7 +48,7 @@ class UserStates(StatesGroup):
 main_kb = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text="💌 Отправить поддержку"), KeyboardButton(text="🔥 Получить поддержку")],
     [KeyboardButton(text="🆘 Нужна помощь"), KeyboardButton(text="🤝 Помочь кому-нибудь")],
-    [KeyboardButton(text="👤 Профиль")]
+    [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="🏆 Топлист")]
 ], resize_keyboard=True)
 
 # Inline клавиатура для запросов помощи
@@ -67,8 +67,7 @@ def get_help_inline_kb():
 # Inline клавиатура для профиля
 def get_profile_inline_kb():
     buttons = [
-        [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")],
-        [InlineKeyboardButton(text="🏆 Топ лист", callback_data="show_toplist")]
+        [InlineKeyboardButton(text="✏️ Сменить никнейм", callback_data="change_nickname")]
     ]
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -324,6 +323,12 @@ async def handle_profile_button(message: types.Message, state: FSMContext):
     """Обработка кнопки Профиль с высоким приоритетом"""
     await state.clear()  # Очищаем состояние
     await show_profile(message, state)
+
+@dp.message(F.text == "🏆 Топлист")
+async def handle_toplist_button(message: types.Message, state: FSMContext):
+    """Обработка кнопки Топлист с высоким приоритетом"""
+    await state.clear()  # Очищаем состояние
+    await show_toplist(message, state)
 
 @dp.message(F.text == "💌 Отправить поддержку")
 async def handle_send_support_button(message: types.Message, state: FSMContext):
@@ -847,14 +852,14 @@ async def handle_change_nickname(callback: types.CallbackQuery, state: FSMContex
     await state.set_state(UserStates.changing_nickname)
     await callback.answer()
 
-@dp.callback_query(F.data == "show_toplist")
-async def handle_show_toplist(callback: types.CallbackQuery, state: FSMContext):
-    """Обработка кнопки 'Топ лист'"""
-    if await check_user_blocked(callback.from_user.id):
-        await send_blocked_callback(callback)
+
+async def show_toplist(message: types.Message, state: FSMContext):
+    """Показать топ-лист пользователя"""
+    if await check_user_blocked(message.from_user.id):
+        await send_blocked_message(message)
         return
     
-    user_id = callback.from_user.id
+    user_id = message.from_user.id
     logger.info(f"Toplist button pressed by user {user_id}")
     
     # Получаем данные топ-листа через API с таймаутом
@@ -901,38 +906,40 @@ async def handle_show_toplist(callback: types.CallbackQuery, state: FSMContext):
             else:
                 toplist_text += f"\n💪 **Твой рейтинг:** {user_rating} ⭐\n_Помогай людям, чтобы попасть в топ!_"
             
-            await callback.message.answer(
+            await message.answer(
                 toplist_text,
-                parse_mode='Markdown'
+                parse_mode='Markdown',
+                reply_markup=main_kb
             )
         else:
             # Если API вернул ошибку, показываем простое сообщение
-            await callback.message.answer(
+            await message.answer(
                 "🏆 **Топ лист**\n\n"
                 "📊 Рейтинговая система в разработке.\n\n"
                 "💡 _Помогай людям, чтобы заработать рейтинг!_",
-                parse_mode='Markdown'
+                parse_mode='Markdown',
+                reply_markup=main_kb
             )
     
     except asyncio.TimeoutError:
         logger.warning(f"Toplist API timeout for user {user_id}")
-        await callback.message.answer(
+        await message.answer(
             "🏆 **Топ лист**\n\n"
             "⏰ Сервер временно недоступен.\n\n"
             "💡 _Попробуй позже!_",
-            parse_mode='Markdown'
+            parse_mode='Markdown',
+            reply_markup=main_kb
         )
     
     except Exception as e:
         logger.error(f"Toplist error for user {user_id}: {e}")
-        await callback.message.answer(
+        await message.answer(
             "🏆 **Топ лист**\n\n"
             "📊 Рейтинговая система в разработке.\n\n"
             "💡 _Помогай людям, чтобы заработать рейтинг!_",
-            parse_mode='Markdown'
+            parse_mode='Markdown',
+            reply_markup=main_kb
         )
-    
-    await callback.answer()
 
 
 
