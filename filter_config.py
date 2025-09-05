@@ -13,7 +13,7 @@ FILTER_SETTINGS = {
     "enable_bad_words_check": True,
     "enable_offensive_words_check": True,
     "enable_links_check": True,
-    "enable_spam_check": True,
+    "enable_spam_check": False,  # Временно отключена блокировка за спам
     
     # Строгость фильтра (low, medium, high)
     "filter_strictness": "medium"
