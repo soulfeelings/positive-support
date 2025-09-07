@@ -111,7 +111,7 @@ class AchievementSystem:
         """Проверить условие количества оказанной помощи"""
         required_count = condition["count"]
         
-        # Получаем рейтинг пользователя (количество раз, когда помог)
+        # Получаем рейтинг пользователя (количество людей, которым помогли)
         result = await self.db.fetchval(
             "SELECT rating FROM ratings WHERE user_id = $1",
             user_id
