@@ -21,7 +21,7 @@ ACHIEVEMENTS = {
         "description": "Помогли кому-то в первый раз",
         "type": "first_help",
         "condition": {"action": "help_given", "count": 1},
-        "icon": "🆘"
+        "icon": ""
     },
     
     # Рейтинговые вехи
