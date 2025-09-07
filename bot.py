@@ -212,10 +212,7 @@ async def start(message: types.Message, state: FSMContext):
     if profile.get("status") == "ok" and profile.get("nickname"):
         nickname = profile.get('nickname')
         
-        # Проверяем достижения при входе
-        new_achievements = await check_user_achievements(user_id, "registration")
-        if new_achievements:
-            await send_achievement_notification(message, new_achievements)
+        # Достижения теперь проверяются только при нажатии на кнопку
         
         welcome_text = f"""👋 **Добро пожаловать в бот поддержки, {escape_markdown(nickname)}!**
 
@@ -510,13 +507,7 @@ async def handle_message(message: types.Message, state: FSMContext):
                         new_rating = rating_result.get("new_rating", 0)
                         logger.info(f"Rating incremented for user {message.from_user.id}, new rating: {new_rating}")
                         
-                        # Проверяем достижения за помощь и рейтинг
-                        help_achievements = await check_user_achievements(message.from_user.id, "help_given")
-                        rating_achievements = await check_user_achievements(message.from_user.id, "rating_reached", rating=new_rating)
-                        
-                        all_achievements = help_achievements + rating_achievements
-                        if all_achievements:
-                            await send_achievement_notification(message, all_achievements)
+                        # Достижения проверяются только при нажатии на кнопку "Достижения"
                     else:
                         logger.warning(f"Failed to increment rating for user {message.from_user.id}")
                     
@@ -541,10 +532,7 @@ async def handle_message(message: types.Message, state: FSMContext):
             if result.get("status") == "success":
                 await message.answer(f"✅ {content_description.capitalize()} поддержки отправлено!", reply_markup=main_kb)
                 
-                # Проверяем достижения за отправку сообщений
-                new_achievements = await check_user_achievements(user_id, "messages_sent")
-                if new_achievements:
-                    await send_achievement_notification(message, new_achievements)
+                # Достижения проверяются только при нажатии на кнопку "Достижения"
             else:
                 await message.answer("❌ Ошибка отправки", reply_markup=main_kb)
     
@@ -1029,15 +1017,50 @@ async def show_toplist(message: types.Message, state: FSMContext):
 
 
 async def show_achievements(message: types.Message, state: FSMContext):
-    """Показать достижения пользователя"""
+    """Показать достижения пользователя и проверить новые"""
     if await check_user_blocked(message.from_user.id):
         await send_blocked_message(message)
         return
     
     user_id = message.from_user.id
-    logger.info(f"Showing achievements for user {user_id}")
+    logger.info(f"Checking and showing achievements for user {user_id}")
     
-    # Получаем достижения пользователя
+    # Проверяем все возможные достижения
+    all_new_achievements = []
+    
+    # 1. Проверяем достижения за регистрацию
+    registration_achievements = await check_user_achievements(user_id, "registration")
+    all_new_achievements.extend(registration_achievements)
+    
+    # 2. Проверяем достижения за помощь (получаем текущий рейтинг)
+    try:
+        profile_result = await api_request("get_profile", {"user_id": user_id})
+        if profile_result.get("status") == "ok":
+            current_rating = profile_result.get("rating", 0)
+            help_achievements = await check_user_achievements(user_id, "help_given")
+            rating_achievements = await check_user_achievements(user_id, "rating_reached", rating=current_rating)
+            all_new_achievements.extend(help_achievements)
+            all_new_achievements.extend(rating_achievements)
+    except Exception as e:
+        logger.error(f"Error getting profile for achievements: {e}")
+    
+    # 3. Проверяем достижения за сообщения
+    messages_achievements = await check_user_achievements(user_id, "messages_sent")
+    all_new_achievements.extend(messages_achievements)
+    
+    # 4. Проверяем специальные достижения
+    special_achievements = await check_user_achievements(user_id, "no_complaints")
+    all_new_achievements.extend(special_achievements)
+    
+    top_achievements = await check_user_achievements(user_id, "top_position")
+    all_new_achievements.extend(top_achievements)
+    
+    # Отправляем уведомления о новых достижениях
+    if all_new_achievements:
+        await send_achievement_notification(message, all_new_achievements)
+        await message.answer("🔄 Проверка достижений завершена!", reply_markup=main_kb)
+    
+    # Получаем все достижения пользователя для отображения
     achievements, stats = await get_user_achievements(user_id)
     
     if not achievements:
@@ -1048,7 +1071,7 @@ async def show_achievements(message: types.Message, state: FSMContext):
             "• Помогайте другим людям\n"
             "• Отправляйте сообщения поддержки\n"
             "• Поднимайте свой рейтинг\n\n"
-            "🏆 Достижения появляются автоматически!",
+            "🔄 **Нажмите на кнопку 'Достижения' для проверки новых!**",
             parse_mode='Markdown',
             reply_markup=main_kb
         )
@@ -1074,7 +1097,8 @@ async def show_achievements(message: types.Message, state: FSMContext):
         achievements_text += "\n"
     
     # Добавляем информацию о прогрессе
-    achievements_text += "💡 **Продолжайте помогать другим, чтобы получить больше достижений!**"
+    achievements_text += "💡 **Продолжайте помогать другим, чтобы получить больше достижений!**\n"
+    achievements_text += "🔄 **Нажмите на кнопку 'Достижения' для проверки новых!**"
     
     await message.answer(
         achievements_text,
