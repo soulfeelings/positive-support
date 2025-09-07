@@ -865,7 +865,7 @@ async def show_profile(message: types.Message, state: FSMContext):
         if earned_achievements:
             profile_text += "\n\n✅ **Заработанные достижения:**\n"
             for achievement in earned_achievements[:5]:  # Показываем первые 5 достижений
-                profile_text += f"• {achievement['icon']} {achievement['name']}\n"
+                profile_text += f"• {achievement['name']}\n"
             
             if len(earned_achievements) > 5:
                 profile_text += f"• ... и еще {len(earned_achievements) - 5} достижений\n"
