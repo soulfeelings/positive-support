@@ -180,6 +180,21 @@ async def get_user_achievements(user_id: int):
         logger.error(f"Error getting achievements for user {user_id}: {e}")
         return [], {}
 
+async def check_user_achievements_dynamic(user_id: int, **kwargs):
+    """Динамическая проверка достижений пользователя без сохранения в БД"""
+    try:
+        result = await api_request("check_achievements_dynamic", {
+            "user_id": user_id,
+            "data": kwargs
+        })
+        
+        if result.get("status") == "success":
+            return result.get("achievements", [])
+        return []
+    except Exception as e:
+        logger.error(f"Error checking dynamic achievements for user {user_id}: {e}")
+        return []
+
 
 async def send_achievement_notification(message: types.Message, achievements: list):
     """Отправить уведомление о новых достижениях"""
@@ -673,22 +688,6 @@ async def show_profile(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     logger.info(f"Showing profile for user {user_id}")
     
-    # Проверяем достижения перед показом профиля
-    all_new_achievements = []
-    try:
-        # Получаем профиль для дополнительных данных
-        profile_result = await api_request("profile", {"user_id": user_id})
-        current_rating = profile_result.get("rating", 0) if profile_result.get("status") == "ok" else 0
-        
-        # Проверяем все достижения сразу
-        achievements = await check_user_achievements(user_id, "all", rating=current_rating)
-        all_new_achievements.extend(achievements)
-        
-        # Достижения проверяются, но уведомления не отправляются
-            
-    except Exception as e:
-        logger.error(f"Error checking achievements for user {user_id}: {e}")
-    
     # Получаем профиль пользователя
     profile = await api_request("profile", {"user_id": user_id})
     
@@ -724,9 +723,14 @@ async def show_profile(message: types.Message, state: FSMContext):
             status_icon = "🚫"
             status_text = "_критическая репутация_"
         
-        # Получаем информацию о достижениях
-        achievements, achievement_stats = await get_user_achievements(user_id)
-        total_achievements = len(achievements)
+        # Динамически проверяем достижения без сохранения в БД
+        try:
+            earned_achievements = await check_user_achievements_dynamic(user_id, rating=rating)
+            total_achievements = len(earned_achievements)
+        except Exception as e:
+            logger.error(f"Error checking dynamic achievements for user {user_id}: {e}")
+            earned_achievements = []
+            total_achievements = 0
         
         profile_text = f"""👤 **Твой профиль**
 
@@ -742,14 +746,14 @@ async def show_profile(message: types.Message, state: FSMContext):
 🎖️ **Достижения:**
 🏆 Всего: **{total_achievements}**"""
         
-        # Добавляем список достижений, если они есть
-        if achievements:
-            profile_text += "\n\n✅ **Полученные достижения:**\n"
-            for achievement in achievements[:5]:  # Показываем первые 5 достижений
+        # Добавляем список заработанных достижений
+        if earned_achievements:
+            profile_text += "\n\n✅ **Заработанные достижения:**\n"
+            for achievement in earned_achievements[:5]:  # Показываем первые 5 достижений
                 profile_text += f"• {achievement['icon']} {achievement['name']}\n"
             
-            if len(achievements) > 5:
-                profile_text += f"• ... и еще {len(achievements) - 5} достижений\n"
+            if len(earned_achievements) > 5:
+                profile_text += f"• ... и еще {len(earned_achievements) - 5} достижений\n"
         else:
             profile_text += "\n\n📭 _Пока нет достижений_\n💡 Помогайте другим, чтобы получить достижения!"
         

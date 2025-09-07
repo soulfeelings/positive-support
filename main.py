@@ -730,6 +730,31 @@ async def get_all_achievements():
         logger.error(f"Error getting all achievements: {e}")
         return {"status": "error", "message": str(e)}
 
+@app.post("/check_achievements_dynamic")
+async def check_achievements_dynamic(data: CheckAchievementsQuery):
+    """Динамическая проверка достижений без сохранения в БД"""
+    try:
+        conn = await get_connection()
+        achievement_system = AchievementSystem(conn)
+        
+        # Проверяем достижения без сохранения
+        earned_achievements = await achievement_system.check_achievements_dynamic(
+            data.user_id, 
+            **data.data
+        )
+        
+        await conn.close()
+        
+        return {
+            "status": "success",
+            "achievements": earned_achievements,
+            "count": len(earned_achievements)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking dynamic achievements: {e}")
+        return {"status": "error", "message": str(e)}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

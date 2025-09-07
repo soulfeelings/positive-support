@@ -267,6 +267,48 @@ class AchievementSystem:
             logger.error(f"Error getting recent achievements for {user_id}: {e}")
             return []
     
+    async def check_achievements_dynamic(self, user_id: int, **kwargs) -> List[Dict]:
+        """
+        Проверить достижения пользователя без сохранения в базу данных
+        Возвращает только те достижения, которые пользователь уже заработал
+        """
+        earned_achievements = []
+        
+        try:
+            # Получаем все доступные достижения из базы данных
+            all_achievements = await self.db.fetch("""
+                SELECT id, name, description, type, condition_data, icon
+                FROM achievements
+            """)
+            
+            # Проверяем каждое достижение
+            for achievement_row in all_achievements:
+                achievement_id = achievement_row["id"]
+                achievement = {
+                    "id": achievement_id,
+                    "name": achievement_row["name"],
+                    "description": achievement_row["description"],
+                    "type": achievement_row["type"],
+                    "condition": achievement_row["condition_data"],
+                    "icon": achievement_row["icon"]
+                }
+                
+                print(f"🔍 Проверяем достижение: {achievement_id} ({achievement['name']})")
+                    
+                # Проверяем условие достижения
+                if await self._check_achievement_condition(user_id, achievement, "all", **kwargs):
+                    earned_achievements.append(achievement)
+                    print(f"✅ Достижение заработано: {achievement['name']} пользователем {user_id}")
+                else:
+                    print(f"❌ Условие не выполнено для {achievement_id}")
+            
+            print(f"✅ Динамическая проверка завершена. Заработанных достижений: {len(earned_achievements)}")
+            return earned_achievements
+            
+        except Exception as e:
+            logger.error(f"Error checking dynamic achievements for user {user_id}: {e}")
+            return []
+    
     def format_achievement_notification(self, achievement: Dict) -> str:
         """Форматировать уведомление о получении достижения"""
         return f"""🏆 **Новое достижение!**
