@@ -211,7 +211,7 @@ async def start(message: types.Message, state: FSMContext):
     if profile.get("status") == "ok" and profile.get("nickname"):
         nickname = profile.get('nickname')
         
-        # Достижения теперь проверяются только при нажатии на кнопку
+        # Достижения проверяются только при открытии профиля
         
         welcome_text = f"""👋 **Добро пожаловать в бот поддержки, {escape_markdown(nickname)}!**
 
@@ -501,7 +501,7 @@ async def handle_message(message: types.Message, state: FSMContext):
                         new_rating = rating_result.get("new_rating", 0)
                         logger.info(f"Rating incremented for user {message.from_user.id}, new rating: {new_rating}")
                         
-                        # Достижения проверяются только при нажатии на кнопку "Достижения"
+                        # Достижения проверяются только при открытии профиля
                     else:
                         logger.warning(f"Failed to increment rating for user {message.from_user.id}")
                     
@@ -526,7 +526,7 @@ async def handle_message(message: types.Message, state: FSMContext):
             if result.get("status") == "success":
                 await message.answer(f"✅ {content_description.capitalize()} поддержки отправлено!", reply_markup=main_kb)
                 
-                # Достижения проверяются только при нажатии на кнопку "Достижения"
+                # Достижения проверяются только при открытии профиля
             else:
                 await message.answer("❌ Ошибка отправки", reply_markup=main_kb)
     
