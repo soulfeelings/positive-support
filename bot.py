@@ -248,14 +248,6 @@ async def get_user_earned_achievements(user_id: int, rating: int, messages_count
             "icon": "👑"
         })
     
-    if rating >= 1000:
-        earned_achievements.append({
-            "id": "helper_1000",
-            "name": "🎖️ Мастер помощи",
-            "description": "Помогли 1000 людям",
-            "icon": "🎖️"
-        })
-    
     # Достижения за сообщения (если есть данные)
     if messages_count >= 10:
         earned_achievements.append({
@@ -297,17 +289,25 @@ async def get_user_earned_achievements(user_id: int, rating: int, messages_count
         "icon": "🎉"
     })
     
-    # Достижение за первое место (если рейтинг больше 0)
-    if rating > 0:
+    # Достижение за первое место (только для очень высокого рейтинга)
+    if rating >= 100:
         earned_achievements.append({
             "id": "top_1",
             "name": "🏆 Чемпион",
-            "description": "Заняли первое место в рейтинге",
+            "description": "Достигли высокого рейтинга",
             "icon": "🏆"
         })
     
-    logger.info(f"✅ Найдено {len(earned_achievements)} достижений для пользователя {user_id} с рейтингом {rating}")
-    return earned_achievements
+    # Убираем дубликаты по ID
+    unique_achievements = []
+    seen_ids = set()
+    for achievement in earned_achievements:
+        if achievement["id"] not in seen_ids:
+            unique_achievements.append(achievement)
+            seen_ids.add(achievement["id"])
+    
+    logger.info(f"✅ Найдено {len(unique_achievements)} уникальных достижений для пользователя {user_id} с рейтингом {rating}")
+    return unique_achievements
 
 
 async def send_achievement_notification(message: types.Message, achievements: list):
