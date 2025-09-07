@@ -40,15 +40,22 @@ class AchievementSystem:
             for achievement_id, achievement in ACHIEVEMENTS.items():
                 # Пропускаем уже полученные достижения
                 if achievement_id in user_achievement_ids:
+                    print(f"⏭️ Пропускаем {achievement_id} - уже получено")
                     continue
+                
+                print(f"🔍 Проверяем достижение: {achievement_id} ({achievement['name']})")
                     
                 # Проверяем условие достижения
                 if await self._check_achievement_condition(user_id, achievement, action, **kwargs):
                     # Выдаем достижение
                     await self._grant_achievement(user_id, achievement)
                     new_achievements.append(achievement)
+                    print(f"🏆 Достижение выдано: {achievement['name']} пользователю {user_id}")
                     logger.info(f"🏆 Achievement granted: {achievement['name']} to user {user_id}")
+                else:
+                    print(f"❌ Условие не выполнено для {achievement_id}")
             
+            print(f"✅ Проверка завершена. Новых достижений: {len(new_achievements)}")
             return new_achievements
             
         except Exception as e:
@@ -96,6 +103,8 @@ class AchievementSystem:
         )
         current_count = result or 0
         
+        print(f"🔍 Проверка помощи: пользователь {user_id}, текущее количество: {current_count}, требуется: {required_count}, результат: {current_count >= required_count}")
+        
         return current_count >= required_count
     
     
@@ -109,6 +118,8 @@ class AchievementSystem:
         )
         current_rating = result or 0
         
+        print(f"🔍 Проверка рейтинга: пользователь {user_id}, текущий рейтинг: {current_rating}, требуется: {required_rating}, результат: {current_rating >= required_rating}")
+        
         return current_rating >= required_rating
     
     async def _check_messages_sent_condition(self, user_id: int, condition: Dict, **kwargs) -> bool:
@@ -120,6 +131,8 @@ class AchievementSystem:
             user_id
         )
         current_count = result or 0
+        
+        print(f"🔍 Проверка сообщений: пользователь {user_id}, текущее количество: {current_count}, требуется: {required_count}, результат: {current_count >= required_count}")
         
         return current_count >= required_count
     
