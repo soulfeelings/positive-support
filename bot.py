@@ -1028,37 +1028,25 @@ async def show_achievements(message: types.Message, state: FSMContext):
     # Проверяем все возможные достижения
     all_new_achievements = []
     
-    # 1. Проверяем достижения за регистрацию
-    registration_achievements = await check_user_achievements(user_id, "registration")
-    all_new_achievements.extend(registration_achievements)
-    
-    # 2. Проверяем достижения за помощь (получаем текущий рейтинг)
     try:
-        profile_result = await api_request("get_profile", {"user_id": user_id})
-        if profile_result.get("status") == "ok":
-            current_rating = profile_result.get("rating", 0)
-            help_achievements = await check_user_achievements(user_id, "help_given")
-            rating_achievements = await check_user_achievements(user_id, "rating_reached", rating=current_rating)
-            all_new_achievements.extend(help_achievements)
-            all_new_achievements.extend(rating_achievements)
+        # Получаем профиль для дополнительных данных
+        profile_result = await api_request("profile", {"user_id": user_id})
+        current_rating = profile_result.get("rating", 0) if profile_result.get("status") == "ok" else 0
+        
+        # Проверяем все достижения сразу
+        try:
+            achievements = await check_user_achievements(user_id, "all", rating=current_rating)
+            all_new_achievements.extend(achievements)
+        except Exception as e:
+            logger.error(f"Error checking all achievements: {e}")
+        
+        # Отправляем уведомления о новых достижениях
+        if all_new_achievements:
+            await send_achievement_notification(message, all_new_achievements)
+            await message.answer("🔄 Проверка достижений завершена!", reply_markup=main_kb)
+            
     except Exception as e:
-        logger.error(f"Error getting profile for achievements: {e}")
-    
-    # 3. Проверяем достижения за сообщения
-    messages_achievements = await check_user_achievements(user_id, "messages_sent")
-    all_new_achievements.extend(messages_achievements)
-    
-    # 4. Проверяем специальные достижения
-    special_achievements = await check_user_achievements(user_id, "no_complaints")
-    all_new_achievements.extend(special_achievements)
-    
-    top_achievements = await check_user_achievements(user_id, "top_position")
-    all_new_achievements.extend(top_achievements)
-    
-    # Отправляем уведомления о новых достижениях
-    if all_new_achievements:
-        await send_achievement_notification(message, all_new_achievements)
-        await message.answer("🔄 Проверка достижений завершена!", reply_markup=main_kb)
+        logger.error(f"Error checking achievements for user {user_id}: {e}")
     
     # Получаем все достижения пользователя для отображения
     achievements, stats = await get_user_achievements(user_id)

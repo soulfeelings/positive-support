@@ -67,8 +67,8 @@ class AchievementSystem:
         condition = achievement["condition"]
         condition_action = condition["action"]
         
-        # Проверяем, что действие соответствует условию
-        if condition_action != action:
+        # Проверяем, что действие соответствует условию (только если action не "all")
+        if action != "all" and condition_action != action:
             return False
             
         try:
