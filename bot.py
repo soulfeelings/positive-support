@@ -684,9 +684,7 @@ async def show_profile(message: types.Message, state: FSMContext):
         achievements = await check_user_achievements(user_id, "all", rating=current_rating)
         all_new_achievements.extend(achievements)
         
-        # Отправляем уведомления о новых достижениях
-        if all_new_achievements:
-            await send_achievement_notification(message, all_new_achievements)
+        # Достижения проверяются, но уведомления не отправляются
             
     except Exception as e:
         logger.error(f"Error checking achievements for user {user_id}: {e}")

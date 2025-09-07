@@ -117,14 +117,6 @@ ACHIEVEMENTS = {
         "icon": "🎉"
     },
     
-    "perfect_reputation": {
-        "id": "perfect_reputation", 
-        "name": "✨ Идеальная репутация",
-        "description": "Никогда не получали жалоб",
-        "type": "special",
-        "condition": {"action": "no_complaints", "rating": 50},
-        "icon": "✨"
-    },
     
     "top_1": {
         "id": "top_1",

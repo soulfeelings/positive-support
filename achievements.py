@@ -7,7 +7,6 @@
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
-from achievements_config import ACHIEVEMENTS
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +35,24 @@ class AchievementSystem:
             user_achievements = await self.get_user_achievements(user_id)
             user_achievement_ids = {a["achievement_id"] for a in user_achievements}
             
+            # Получаем все доступные достижения из базы данных
+            all_achievements = await self.db.fetch("""
+                SELECT id, name, description, type, condition_data, icon
+                FROM achievements
+            """)
+            
             # Проверяем каждое достижение
-            for achievement_id, achievement in ACHIEVEMENTS.items():
+            for achievement_row in all_achievements:
+                achievement_id = achievement_row["id"]
+                achievement = {
+                    "id": achievement_id,
+                    "name": achievement_row["name"],
+                    "description": achievement_row["description"],
+                    "type": achievement_row["type"],
+                    "condition": achievement_row["condition_data"],
+                    "icon": achievement_row["icon"]
+                }
+                
                 # Пропускаем уже полученные достижения
                 if achievement_id in user_achievement_ids:
                     print(f"⏭️ Пропускаем {achievement_id} - уже получено")
@@ -96,9 +111,9 @@ class AchievementSystem:
         """Проверить условие количества оказанной помощи"""
         required_count = condition["count"]
         
-        # Получаем количество раз, когда пользователь помог
+        # Получаем рейтинг пользователя (количество раз, когда помог)
         result = await self.db.fetchval(
-            "SELECT COUNT(*) FROM ratings WHERE user_id = $1",
+            "SELECT rating FROM ratings WHERE user_id = $1",
             user_id
         )
         current_count = result or 0
