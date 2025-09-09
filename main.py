@@ -2,9 +2,10 @@ import os
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import asyncpg
 import logging
+from achievements import AchievementSystem
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -67,6 +68,14 @@ class ReminderSettings(BaseModel):
 
 class TopListQuery(BaseModel):
     user_id: int
+
+class AchievementQuery(BaseModel):
+    user_id: int
+
+class CheckAchievementsQuery(BaseModel):
+    user_id: int
+    action: str
+    data: Optional[dict] = {}
 
 # API эндпоинты
 @app.get("/")
@@ -634,6 +643,117 @@ async def health():
         return {"status": "healthy"}
     except Exception as e:
         return JSONResponse({"status": "unhealthy"}, status_code=503)
+
+# Эндпоинты для системы достижений
+@app.post("/check_achievements")
+async def check_achievements(data: CheckAchievementsQuery):
+    """Проверка и выдача достижений пользователю"""
+    try:
+        conn = await get_connection()
+        achievement_system = AchievementSystem(conn)
+        
+        # Проверяем достижения
+        new_achievements = await achievement_system.check_achievements(
+            data.user_id, 
+            data.action, 
+            **data.data
+        )
+        
+        await conn.close()
+        
+        return {
+            "status": "success",
+            "new_achievements": new_achievements,
+            "count": len(new_achievements)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking achievements: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.post("/get_user_achievements")
+async def get_user_achievements(data: AchievementQuery):
+    """Получение достижений пользователя"""
+    try:
+        conn = await get_connection()
+        achievement_system = AchievementSystem(conn)
+        
+        achievements = await achievement_system.get_user_achievements(data.user_id)
+        stats = await achievement_system.get_achievement_stats(data.user_id)
+        
+        await conn.close()
+        
+        return {
+            "status": "success",
+            "achievements": achievements,
+            "stats": stats
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting user achievements: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/get_recent_achievements")
+async def get_recent_achievements(data: AchievementQuery):
+    """Получение последних достижений пользователя"""
+    try:
+        conn = await get_connection()
+        achievement_system = AchievementSystem(conn)
+        
+        recent_achievements = await achievement_system.get_recent_achievements(data.user_id, limit=5)
+        
+        await conn.close()
+        
+        return {
+            "status": "success",
+            "recent_achievements": recent_achievements
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting recent achievements: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/get_all_achievements")
+async def get_all_achievements():
+    """Получение всех доступных достижений"""
+    try:
+        from achievements_config import get_all_achievements
+        achievements = get_all_achievements()
+        
+        return {
+            "status": "success",
+            "achievements": achievements
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting all achievements: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.post("/check_achievements_dynamic")
+async def check_achievements_dynamic(data: CheckAchievementsQuery):
+    """Динамическая проверка достижений без сохранения в БД"""
+    try:
+        conn = await get_connection()
+        achievement_system = AchievementSystem(conn)
+        
+        # Проверяем достижения без сохранения
+        earned_achievements = await achievement_system.check_achievements_dynamic(
+            data.user_id, 
+            **data.data
+        )
+        
+        await conn.close()
+        
+        return {
+            "status": "success",
+            "achievements": earned_achievements,
+            "count": len(earned_achievements)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking dynamic achievements: {e}")
+        return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
